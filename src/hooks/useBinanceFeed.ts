@@ -95,7 +95,12 @@ function klineToCandle(kline: unknown[], prevCvd: number, tickSize: number): Foo
   };
 }
 
-async function fetchKlines(symbol: string, interval: string, limit: number, tickSize: number): Promise<FootprintCandle[]> {
+async function fetchKlines(
+  symbol: string,
+  interval: string,
+  limit: number,
+  tickSize: number,
+): Promise<{ closed: FootprintCandle[]; openCandle: FootprintCandle }> {
   const url  = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol.toUpperCase()}&interval=${interval}&limit=${limit}`;
   const res  = await fetch(url);
   if (!res.ok) throw new Error(`Klines HTTP ${res.status}`);
@@ -104,8 +109,10 @@ async function fetchKlines(symbol: string, interval: string, limit: number, tick
   for (const k of data) {
     out.push(klineToCandle(k, out.length > 0 ? out[out.length - 1].cvd : 0, tickSize));
   }
-  // Drop the last entry — it is the still-open candle on Binance's side
-  return out.slice(0, -1);
+  // Last entry is the still-open candle — keep it as the seed for s.open
+  const openCandle = out[out.length - 1];
+  const closed     = out.slice(0, -1);
+  return { closed, openCandle };
 }
 
 export function useBinanceFeed(
@@ -142,13 +149,14 @@ export function useBinanceFeed(
     const period   = TIMEFRAME_MS[timeframe] ?? 60_000;
     const interval = binanceInterval(timeframe);
 
-    // 1. Load historical klines, then open WebSocket
+    // 1. Load historical klines + seed the current open candle, then open WebSocket
     fetchKlines(symbol, interval, maxCandles + 1, tickSize)
-      .then(historical => {
+      .then(({ closed, openCandle }) => {
         if (!alive) return;
 
-        stateRef.current.candles = historical;
-        setCandles([...historical]);
+        stateRef.current.candles = closed;
+        stateRef.current.open    = openCandle;   // seed with partial data
+        setCandles([...closed, { ...openCandle, rows: [...openCandle.rows] }]);
 
         // 2. Subscribe to live aggTrade stream
         ws = new WebSocket(`wss://fstream.binance.com/ws/${symbol.toLowerCase()}@aggTrade`);
