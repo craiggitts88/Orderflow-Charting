@@ -18,6 +18,7 @@ export interface FootprintSettings {
   atrPeriod: number;         // periods to calculate ATR when mode=atr
   atrDivisor: number;        // number of rows per ATR range (higher = finer rows)
   atrRowSize: number;        // computed result (read-only, set by Index.tsx)
+  barsBack: number;          // how many historical bars to load from real tick data
   fontSize: number;
   cellPadding: number;
   volumeFilter: number;
@@ -57,6 +58,7 @@ export const defaultSettings: FootprintSettings = {
   atrPeriod: 14,
   atrDivisor: 20,
   atrRowSize: 5,
+  barsBack: 50,
   fontSize: 11,
   cellPadding: 2,
   volumeFilter: 0,

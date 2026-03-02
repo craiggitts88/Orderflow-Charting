@@ -45,11 +45,12 @@ const Index = () => {
 
   // Live Binance feed — use settings.tickSize which is kept up to date below
   const symbolConfig = SYMBOLS.find(s => s.value === symbol) ?? defaultSymbol;
-  const { candles: liveCandles, status: feedStatus } = useBinanceFeed(
+  const { candles: liveCandles, status: feedStatus, loadingProgress } = useBinanceFeed(
     symbol,
     timeframe,
     settings.tickSize,
     dataSource === 'live',
+    settings.barsBack,
   );
 
   // Which candles to display
@@ -161,9 +162,21 @@ const Index = () => {
               {/* Footprint chart */}
               <Panel defaultSize={settings.showCVD ? 75 : 100} minSize={40} className="min-h-0 relative">
                 <FootprintChart candles={displayCandles} settings={settings} timeframe={timeframe} />
-                {dataSource === 'live' && feedStatus === 'connecting' && displayCandles.length === 0 && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-background/70 text-muted-foreground text-xs font-mono pointer-events-none">
-                    Fetching {symbol.toUpperCase()} history…
+                {dataSource === 'live' && (feedStatus === 'loading' || feedStatus === 'connecting') && displayCandles.length === 0 && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background/70 pointer-events-none">
+                    <span className="text-muted-foreground text-xs font-mono">
+                      {feedStatus === 'loading'
+                        ? `Loading ${settings.barsBack} bars of tick data… ${loadingProgress}%`
+                        : `Connecting to ${symbol.toUpperCase()}…`}
+                    </span>
+                    {feedStatus === 'loading' && (
+                      <div className="w-48 bg-muted rounded-full h-1 overflow-hidden">
+                        <div
+                          className="h-1 bg-yellow-400 transition-all duration-200 rounded-full"
+                          style={{ width: `${loadingProgress}%` }}
+                        />
+                      </div>
+                    )}
                   </div>
                 )}
               </Panel>
@@ -197,6 +210,7 @@ const Index = () => {
                   symbol={symbol}
                   dataSource={dataSource}
                   feedStatus={feedStatus}
+                  loadingProgress={loadingProgress}
                   minTick={symbolConfig.minTick}
                 />
                 </div>

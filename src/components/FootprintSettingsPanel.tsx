@@ -20,12 +20,14 @@ interface FootprintSettingsPanelProps {
   symbol?: string;
   dataSource?: 'mock' | 'live';
   feedStatus?: FeedStatus;
+  loadingProgress?: number;
   minTick?: number;
 }
 
 const STATUS_COLOR: Record<FeedStatus, string> = {
   idle:         'bg-muted-foreground',
   connecting:   'bg-yellow-400 animate-pulse',
+  loading:      'bg-yellow-400 animate-pulse',
   connected:    'bg-green-500',
   disconnected: 'bg-red-500',
   error:        'bg-red-500',
@@ -34,6 +36,7 @@ const STATUS_COLOR: Record<FeedStatus, string> = {
 const STATUS_LABEL: Record<FeedStatus, string> = {
   idle:         'Idle',
   connecting:   'Connecting…',
+  loading:      'Loading ticks…',
   connected:    'Live',
   disconnected: 'Disconnected',
   error:        'Error',
@@ -45,6 +48,7 @@ const FootprintSettingsPanel: React.FC<FootprintSettingsPanelProps> = ({
   symbol = 'btcusdt',
   dataSource = 'mock',
   feedStatus = 'idle',
+  loadingProgress = 0,
   minTick = 0.1,
 }) => {
   const update = (partial: Partial<FootprintSettings>) => {
@@ -273,6 +277,18 @@ const FootprintSettingsPanel: React.FC<FootprintSettingsPanelProps> = ({
               </span>
             </span>
           </div>
+          {/* Progress bar shown while loading tick history */}
+          {dataSource === 'live' && feedStatus === 'loading' && (
+            <div className="pt-1 space-y-0.5">
+              <div className="w-full bg-muted rounded-full h-1 overflow-hidden">
+                <div
+                  className="h-1 bg-yellow-400 transition-all duration-200 rounded-full"
+                  style={{ width: `${loadingProgress}%` }}
+                />
+              </div>
+              <div className="text-right text-[9px] text-muted-foreground">{loadingProgress}%</div>
+            </div>
+          )}
           <div className="flex items-center justify-between">
             <span className="text-muted-foreground">Symbol</span>
             <span className="text-foreground font-semibold">
@@ -280,6 +296,31 @@ const FootprintSettingsPanel: React.FC<FootprintSettingsPanelProps> = ({
             </span>
           </div>
         </div>
+
+        {/* Bars back selector */}
+        {dataSource === 'live' && (
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs text-muted-foreground">Bars (tick history)</Label>
+              <span className="text-[10px] text-muted-foreground">more = slower load</span>
+            </div>
+            <Select
+              value={String(settings.barsBack)}
+              onValueChange={(v) => update({ barsBack: Number(v) })}
+            >
+              <SelectTrigger className="h-7 text-xs bg-secondary border-border">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="10">10 bars</SelectItem>
+                <SelectItem value="25">25 bars</SelectItem>
+                <SelectItem value="50">50 bars</SelectItem>
+                <SelectItem value="100">100 bars</SelectItem>
+                <SelectItem value="200">200 bars</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        )}
         {dataSource === 'mock' && (
           <p className="text-[9px] text-muted-foreground leading-relaxed">
             Switch to LIVE in the toolbar to connect to Binance Futures.
