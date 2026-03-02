@@ -75,8 +75,8 @@ function klineToCandle(kline: unknown[], prevCvd: number, tickSize: number): Foo
   for (let i = 0; i < levels; i++) {
     const price    = parseFloat((lo + i * tickSize).toFixed(10));
     const frac     = weights[i] / wSum;
-    const askVol   = Math.round(buyBaseVol  * frac * 100) / 100;
-    const bidVol   = Math.round(sellBaseVol * frac * 100) / 100;
+    const askVol   = Math.round(buyBaseVol  * frac);
+    const bidVol   = Math.round(sellBaseVol * frac);
     const delta    = askVol - bidVol;
     totalDelta    += delta;
     rows.push({ price, bidVolume: bidVol, askVolume: askVol, delta, totalVolume: askVol + bidVol, trades: Math.max(1, Math.round(trades * frac)) });
@@ -175,7 +175,8 @@ export function useBinanceFeed(
 
           const s           = stateRef.current;
           const candleStart = Math.floor(tradeTime / s.period) * s.period;
-          const volume      = Math.max(0.01, parseFloat((price * qty).toFixed(2)));
+          // Use USDT notional rounded to integer
+          const volume      = Math.max(1, Math.round(price * qty));
           const bPrice      = bucketPrice(price, s.tickSize);
 
           if (!s.open || s.open.timestamp !== candleStart) {

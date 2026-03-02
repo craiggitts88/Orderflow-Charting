@@ -28,6 +28,12 @@ interface Drawing {
 const PRICE_AXIS_W = 80;
 const TIME_AXIS_H = 28;
 const MIN_CANDLE_W = 20;
+
+/** Format a volume/delta number without floating-point noise */
+function fmtVol(v: number): string {
+  const r = Math.round(v);
+  return Math.abs(r) >= 1000 ? r.toLocaleString() : r.toString();
+}
 const MAX_CANDLE_W = 400;
 let nextDrawingId = 1;
 
@@ -242,8 +248,8 @@ const FootprintChart: React.FC<FootprintChartProps> = ({ candles, settings, time
           }
 
           if (settings.displayMode === "bidAsk") {
-            const bidStr = row.bidVolume > settings.volumeFilter ? row.bidVolume.toString() : "";
-            const askStr = row.askVolume > settings.volumeFilter ? row.askVolume.toString() : "";
+            const bidStr = row.bidVolume > settings.volumeFilter ? fmtVol(row.bidVolume) : "";
+            const askStr = row.askVolume > settings.volumeFilter ? fmtVol(row.askVolume) : "";
             if (!isImbalanced) ctx.fillStyle = BTC;
             ctx.textAlign = "right"; ctx.fillText(bidStr, midX - 4, y);
             if (!isImbalanced) ctx.fillStyle = ATC;
@@ -255,12 +261,12 @@ const FootprintChart: React.FC<FootprintChartProps> = ({ candles, settings, time
           } else if (settings.displayMode === "delta") {
             if (!isImbalanced) ctx.fillStyle = row.delta >= 0 ? ATC : BTC;
             ctx.textAlign = "center";
-            ctx.fillText((row.delta > 0 ? "+" : "") + row.delta, midX, y);
+            ctx.fillText((row.delta > 0 ? "+" : "") + fmtVol(row.delta), midX, y);
 
           } else if (settings.displayMode === "totalVolume") {
             if (!isImbalanced) ctx.fillStyle = `hsl(210,20%,${50 + vI * 30}%)`;
             ctx.textAlign = "center";
-            ctx.fillText(row.totalVolume.toString(), midX, y);
+            ctx.fillText(fmtVol(row.totalVolume), midX, y);
 
           } else if (settings.displayMode === "trades") {
             if (!isImbalanced) ctx.fillStyle = `hsl(270,80%,${55 + vI * 20}%)`;
@@ -270,11 +276,11 @@ const FootprintChart: React.FC<FootprintChartProps> = ({ candles, settings, time
           } else if (settings.displayMode === "bidAskDelta") {
             const third = innerW / 3;
             if (!isImbalanced) ctx.fillStyle = BTC;
-            ctx.textAlign = "center"; ctx.fillText(row.bidVolume.toString(), x + third * 0.5 + 1, y);
+            ctx.textAlign = "center"; ctx.fillText(fmtVol(row.bidVolume), x + third * 0.5 + 1, y);
             if (!isImbalanced) ctx.fillStyle = ATC;
-            ctx.fillText(row.askVolume.toString(), x + third * 1.5 + 1, y);
+            ctx.fillText(fmtVol(row.askVolume), x + third * 1.5 + 1, y);
             if (!isImbalanced) ctx.fillStyle = row.delta >= 0 ? ATC : BTC;
-            ctx.fillText((row.delta > 0 ? "+" : "") + row.delta, x + third * 2.5 + 1, y);
+            ctx.fillText((row.delta > 0 ? "+" : "") + fmtVol(row.delta), x + third * 2.5 + 1, y);
           }
         }
       });
@@ -316,7 +322,7 @@ const FootprintChart: React.FC<FootprintChartProps> = ({ candles, settings, time
         ctx.textAlign = "center";
         ctx.textBaseline = "bottom";
         ctx.fillStyle = candle.totalDelta >= 0 ? settings.askColor : settings.bidColor;
-        ctx.fillText((candle.totalDelta > 0 ? "+" : "") + candle.totalDelta, midX, chartH - 2);
+        ctx.fillText((candle.totalDelta > 0 ? "+" : "") + fmtVol(candle.totalDelta), midX, chartH - 2);
       }
     });
 
