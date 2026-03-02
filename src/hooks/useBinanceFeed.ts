@@ -61,12 +61,13 @@ function klineToCandle(kline: unknown[], prevCvd: number, tickSize: number): Foo
   const mid    = (hi + lo) / 2;
 
   // Bell-curve weight — more volume near middle (POC approximation)
+  // No +0.1 floor: tail levels receive near-zero weight and are excluded if they round to 0
   const weights: number[] = [];
   let wSum = 0;
   for (let i = 0; i < levels; i++) {
     const price = lo + i * tickSize;
     const dist  = Math.abs(price - mid) / ((hi - lo + tickSize) / 2);
-    const w     = Math.exp(-3 * dist * dist) + 0.1;
+    const w     = Math.exp(-4 * dist * dist); // tighter bell, no floor
     weights.push(w);
     wSum += w;
   }
@@ -77,6 +78,7 @@ function klineToCandle(kline: unknown[], prevCvd: number, tickSize: number): Foo
     const frac     = weights[i] / wSum;
     const askVol   = Math.round(buyBaseVol  * frac);
     const bidVol   = Math.round(sellBaseVol * frac);
+    if (askVol === 0 && bidVol === 0) continue; // skip phantom zero-volume rows
     const delta    = askVol - bidVol;
     totalDelta    += delta;
     rows.push({ price, bidVolume: bidVol, askVolume: askVol, delta, totalVolume: askVol + bidVol, trades: Math.max(1, Math.round(trades * frac)) });
@@ -100,19 +102,89 @@ async function fetchKlines(
   interval: string,
   limit: number,
   tickSize: number,
-): Promise<{ closed: FootprintCandle[]; openCandle: FootprintCandle }> {
+): Promise<{ closed: FootprintCandle[]; openKlineStart: number; openKlineOpen: number }> {
   const url  = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol.toUpperCase()}&interval=${interval}&limit=${limit}`;
   const res  = await fetch(url);
   if (!res.ok) throw new Error(`Klines HTTP ${res.status}`);
   const data: unknown[][] = await res.json();
   const out: FootprintCandle[] = [];
-  for (const k of data) {
+  for (const k of data.slice(0, -1)) { // exclude still-open last kline
     out.push(klineToCandle(k, out.length > 0 ? out[out.length - 1].cvd : 0, tickSize));
   }
-  // Last entry is the still-open candle — keep it as the seed for s.open
-  const openCandle = out[out.length - 1];
-  const closed     = out.slice(0, -1);
-  return { closed, openCandle };
+  const lastKline      = data[data.length - 1];
+  const openKlineStart = lastKline[0] as number;
+  const openKlineOpen  = parseFloat(lastKline[1] as string);
+  return { closed: out, openKlineStart, openKlineOpen };
+}
+
+/**
+ * Fetch real Binance aggTrades for the current open candle window and build
+ * an accurate FootprintCandle from actual tick data.
+ */
+async function fetchOpenCandleFromAggTrades(
+  symbol: string,
+  startMs: number,
+  prevCvd: number,
+  tickSize: number,
+  openPrice: number,
+): Promise<FootprintCandle> {
+  const endMs  = Date.now();
+  const rowMap = new Map<number, FootprintRow>();
+  let closePrice = openPrice;
+  let high = openPrice;
+  let low  = openPrice;
+
+  let fromTime = startMs;
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const url = `https://fapi.binance.com/fapi/v1/aggTrades?symbol=${symbol.toUpperCase()}&startTime=${fromTime}&endTime=${endMs}&limit=1000`;
+    const res = await fetch(url);
+    if (!res.ok) break;
+    const trades: Array<{ p: string; q: string; m: boolean; T: number }> = await res.json();
+    if (trades.length === 0) break;
+
+    for (const t of trades) {
+      const price  = parseFloat(t.p);
+      const qty    = parseFloat(t.q);
+      const isSell = t.m;
+      const bPrice = bucketPrice(price, tickSize);
+
+      closePrice = price;
+      if (price > high) high = price;
+      if (price < low)  low  = price;
+
+      let row = rowMap.get(bPrice);
+      if (!row) {
+        row = { price: bPrice, bidVolume: 0, askVolume: 0, delta: 0, totalVolume: 0, trades: 0 };
+        rowMap.set(bPrice, row);
+      }
+      if (isSell) row.bidVolume += qty;
+      else        row.askVolume += qty;
+      row.delta       = row.askVolume - row.bidVolume;
+      row.totalVolume = row.bidVolume + row.askVolume;
+      row.trades++;
+    }
+
+    fromTime = trades[trades.length - 1].T + 1;
+    if (trades.length < 1000) break; // no more pages
+  }
+
+  const rows        = [...rowMap.values()].sort((a, b) => a.price - b.price);
+  const totalVolume = rows.reduce((s, r) => s + r.totalVolume, 0);
+  const totalDelta  = rows.reduce((s, r) => s + r.delta, 0);
+  const pocRow      = rows.length > 0 ? rows.reduce((mx, r) => r.totalVolume > mx.totalVolume ? r : mx, rows[0]) : null;
+  return {
+    timestamp: startMs,
+    open:  openPrice,
+    close: closePrice,
+    high,
+    low,
+    rows,
+    totalVolume,
+    totalDelta,
+    cvd: prevCvd + totalDelta,
+    pocPrice: pocRow?.price ?? openPrice,
+  };
 }
 
 export function useBinanceFeed(
@@ -149,14 +221,29 @@ export function useBinanceFeed(
     const period   = TIMEFRAME_MS[timeframe] ?? 60_000;
     const interval = binanceInterval(timeframe);
 
-    // 1. Load historical klines + seed the current open candle, then open WebSocket
+    // 1. Load historical klines, then fetch real aggTrades for the current open candle
     fetchKlines(symbol, interval, maxCandles + 1, tickSize)
-      .then(({ closed, openCandle }) => {
+      .then(async ({ closed, openKlineStart, openKlineOpen }) => {
         if (!alive) return;
 
         stateRef.current.candles = closed;
-        stateRef.current.open    = openCandle;   // seed with partial data
-        setCandles([...closed, { ...openCandle, rows: [...openCandle.rows] }]);
+        const prevCvd = closed.length > 0 ? closed[closed.length - 1].cvd : 0;
+
+        // Show chart immediately with empty open candle while we load real ticks
+        const placeholder = makeEmptyCandle(openKlineStart, openKlineOpen, prevCvd);
+        stateRef.current.open = placeholder;
+        setCandles([...closed, { ...placeholder }]);
+
+        // Fetch real tick data for the current open candle (accurate orderflow)
+        let openCandle: FootprintCandle;
+        try {
+          openCandle = await fetchOpenCandleFromAggTrades(symbol, openKlineStart, prevCvd, tickSize, openKlineOpen);
+        } catch {
+          openCandle = placeholder;
+        }
+        if (!alive) return;
+        stateRef.current.open = openCandle;
+        setCandles([...stateRef.current.candles, { ...openCandle, rows: [...openCandle.rows] }]);
 
         // 2. Subscribe to live aggTrade stream
         ws = new WebSocket(`wss://fstream.binance.com/ws/${symbol.toLowerCase()}@aggTrade`);
