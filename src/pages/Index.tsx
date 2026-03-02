@@ -19,8 +19,14 @@ const Index = () => {
   const [candles, setCandles] = useState(() => generateFootprintCandles(CANDLE_COUNT, '5m'));
   const [activeTool, setActiveTool] = useState<DrawingTool>('cursor');
   const [symbol, setSymbol] = useState(defaultSymbol.value);
-  const [dataSource, setDataSource] = useState<'mock' | 'live'>('mock');
+  const [dataSource, setDataSource] = useState<'mock' | 'live'>('live');
   const liveRef = useRef(true);
+
+  // Selecting a symbol always switches to live
+  const handleSymbolChange = useCallback((s: string) => {
+    setSymbol(s);
+    setDataSource('live');
+  }, []);
 
   // Live Binance feed
   const symbolConfig = SYMBOLS.find(s => s.value === symbol) ?? defaultSymbol;
@@ -34,12 +40,10 @@ const Index = () => {
   // Which candles to display
   const displayCandles = dataSource === 'live' ? liveCandles : candles;
 
-  // Sync tickSize from symbol config when in live mode
+  // Sync tickSize whenever symbol changes
   useEffect(() => {
-    if (dataSource === 'live') {
-      setSettings(s => ({ ...s, tickSize: symbolConfig.tickSize }));
-    }
-  }, [symbol, dataSource, symbolConfig.tickSize]);
+    setSettings(s => ({ ...s, tickSize: symbolConfig.tickSize }));
+  }, [symbol, symbolConfig.tickSize]);
 
   const handleTimeframeChange = useCallback((tf: string) => {
     setTimeframe(tf);
@@ -105,7 +109,7 @@ const Index = () => {
         activeTool={activeTool}
         onToolChange={handleToolChange}
         symbol={symbol}
-        onSymbolChange={setSymbol}
+        onSymbolChange={handleSymbolChange}
         dataSource={dataSource}
         onDataSourceChange={setDataSource}
         feedStatus={feedStatus}
