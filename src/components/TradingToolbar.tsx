@@ -1,7 +1,7 @@
 ﻿import React from "react";
 import {
   Settings2, RotateCcw, Clock, MousePointer2, Minus,
-  MoveHorizontal, MoveVertical, Square, TrendingUp, Type, Maximize2,
+  MoveHorizontal, MoveVertical, Square, TrendingUp, Type, BarChart2,
   ChevronDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -30,6 +30,7 @@ const TOOLS: { id: DrawingTool; icon: React.ReactNode; label: string }[] = [
   { id: "hline",     icon: <MoveVertical size={12} />,  label: "Horizontal Line" },
   { id: "rectangle", icon: <Square size={12} />,        label: "Rectangle" },
   { id: "fib",       icon: <TrendingUp size={12} />,    label: "Fibonacci" },
+  { id: "frvp",      icon: <BarChart2 size={12} />,     label: "Fixed Range VP" },
   { id: "text",      icon: <Type size={12} />,          label: "Text" },
 ];
 

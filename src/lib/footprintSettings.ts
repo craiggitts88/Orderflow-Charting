@@ -1,6 +1,6 @@
 ﻿export type DisplayMode = 'bidAsk' | 'delta' | 'totalVolume' | 'bidAskDelta' | 'trades';
 export type ColorMode = 'heatmap' | 'histogram' | 'deltaFlow' | 'gradient' | 'solid';
-export type DrawingTool = 'cursor' | 'crosshair' | 'line' | 'hline' | 'vline' | 'rectangle' | 'fib' | 'text';
+export type DrawingTool = 'cursor' | 'crosshair' | 'line' | 'hline' | 'vline' | 'rectangle' | 'fib' | 'text' | 'frvp';
 
 export interface FootprintSettings {
   displayMode: DisplayMode;
@@ -24,9 +24,12 @@ export interface FootprintSettings {
   valueAreaPercent: number;
   showWicks: boolean;
   showCandleBorder: boolean;
+  showCandleBody: boolean;
   // user-adjustable colours
   bidColor: string;
   askColor: string;
+  bidTextColor: string;
+  askTextColor: string;
   pocColor: string;
   imbalanceColor: string;
   upColor: string;
@@ -55,8 +58,11 @@ export const defaultSettings: FootprintSettings = {
   valueAreaPercent: 70,
   showWicks: true,
   showCandleBorder: true,
+  showCandleBody: true,
   bidColor: '#e04444',
   askColor: '#22c55e',
+  bidTextColor: '#f87171',
+  askTextColor: '#4ade80',
   pocColor: '#f59e0b',
   imbalanceColor: '#ffffff',
   upColor: '#22c55e',

@@ -175,8 +175,10 @@ const FootprintChart: React.FC<FootprintChartProps> = ({ candles, settings, time
         const askBarW = maxVol > 0 ? (row.askVolume / maxVol) * halfW : 0;
 
         // ── Color refs for this row ───────────────────────────────────────────
-        const BC = settings.bidColor; // sell / left
-        const AC = settings.askColor; // buy  / right
+        const BC = settings.bidColor;     // sell bar color
+        const AC = settings.askColor;     // buy  bar color
+        const BTC = settings.bidTextColor; // sell text
+        const ATC = settings.askTextColor; // buy  text
 
         // ── Cell background / histogram ───────────────────────────────────────
         if (settings.colorMode === "histogram") {
@@ -251,16 +253,16 @@ const FootprintChart: React.FC<FootprintChartProps> = ({ candles, settings, time
           if (settings.displayMode === "bidAsk") {
             const bidStr = row.bidVolume > settings.volumeFilter ? row.bidVolume.toString() : "";
             const askStr = row.askVolume > settings.volumeFilter ? row.askVolume.toString() : "";
-            if (!isImbalanced) ctx.fillStyle = BC;
+            if (!isImbalanced) ctx.fillStyle = BTC;
             ctx.textAlign = "right"; ctx.fillText(bidStr, midX - 4, y);
-            if (!isImbalanced) ctx.fillStyle = AC;
+            if (!isImbalanced) ctx.fillStyle = ATC;
             ctx.textAlign = "left"; ctx.fillText(askStr, midX + 4, y);
             ctx.strokeStyle = "hsl(220,14%,18%)";
             ctx.lineWidth = 0.5;
             ctx.beginPath(); ctx.moveTo(midX, y - rowH / 2); ctx.lineTo(midX, y + rowH / 2); ctx.stroke();
 
           } else if (settings.displayMode === "delta") {
-            if (!isImbalanced) ctx.fillStyle = row.delta >= 0 ? AC : BC;
+            if (!isImbalanced) ctx.fillStyle = row.delta >= 0 ? ATC : BTC;
             ctx.textAlign = "center";
             ctx.fillText((row.delta > 0 ? "+" : "") + row.delta, midX, y);
 
@@ -276,11 +278,11 @@ const FootprintChart: React.FC<FootprintChartProps> = ({ candles, settings, time
 
           } else if (settings.displayMode === "bidAskDelta") {
             const third = innerW / 3;
-            if (!isImbalanced) ctx.fillStyle = BC;
+            if (!isImbalanced) ctx.fillStyle = BTC;
             ctx.textAlign = "center"; ctx.fillText(row.bidVolume.toString(), x + third * 0.5 + 1, y);
-            if (!isImbalanced) ctx.fillStyle = AC;
+            if (!isImbalanced) ctx.fillStyle = ATC;
             ctx.fillText(row.askVolume.toString(), x + third * 1.5 + 1, y);
-            if (!isImbalanced) ctx.fillStyle = row.delta >= 0 ? AC : BC;
+            if (!isImbalanced) ctx.fillStyle = row.delta >= 0 ? ATC : BTC;
             ctx.fillText((row.delta > 0 ? "+" : "") + row.delta, x + third * 2.5 + 1, y);
           }
         }
@@ -300,6 +302,20 @@ const FootprintChart: React.FC<FootprintChartProps> = ({ candles, settings, time
         ctx.moveTo(midX, highY); ctx.lineTo(midX, Math.min(openY, closeY));
         ctx.moveTo(midX, Math.max(openY, closeY)); ctx.lineTo(midX, lowY);
         ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+
+      // ── Thin candle body ──────────────────────────────────────────────────
+      if (settings.showCandleBody) {
+        const openY = priceToY(candle.open);
+        const closeY = priceToY(candle.close);
+        const isBull = candle.close >= candle.open;
+        const bodyTop = Math.min(openY, closeY);
+        const bodyH = Math.max(2, Math.abs(closeY - openY));
+        const bodyW = Math.max(3, Math.min(6, CW * 0.06));
+        ctx.fillStyle = isBull ? settings.upColor : settings.downColor;
+        ctx.globalAlpha = 0.88;
+        ctx.fillRect(midX - bodyW / 2, bodyTop, bodyW, bodyH);
         ctx.globalAlpha = 1;
       }
 
@@ -419,6 +435,78 @@ const FootprintChart: React.FC<FootprintChartProps> = ({ candles, settings, time
           ctx.textAlign = "left"; ctx.textBaseline = "bottom";
           ctx.fillText(`${(level * 100).toFixed(1)}%`, Math.min(x1, x2) + CW / 2 + 2, fy - 1);
         });
+
+      } else if (d.type === "frvp") {
+        // Fixed Range Volume Profile
+        const leftCI = Math.min(d.time1, d.time2);
+        const rightCI = Math.max(d.time1, d.time2);
+        const rangeCandles = candles.slice(
+          Math.max(0, leftCI),
+          Math.min(candles.length, rightCI + 1)
+        );
+        if (rangeCandles.length === 0) return;
+
+        // Build price -> volume map
+        const pvMap = new Map<number, { bid: number; ask: number; total: number }>();
+        rangeCandles.forEach(c => c.rows.forEach(r => {
+          const e = pvMap.get(r.price) ?? { bid: 0, ask: 0, total: 0 };
+          pvMap.set(r.price, {
+            bid: e.bid + r.bidVolume,
+            ask: e.ask + r.askVolume,
+            total: e.total + r.totalVolume,
+          });
+        }));
+
+        const maxPV = Math.max(...Array.from(pvMap.values()).map(v => v.total));
+        const pocPrice = Array.from(pvMap.entries()).reduce((a, b) => b[1].total > a[1].total ? b : a)[0];
+
+        // Draw region boundary lines
+        const lx = candleX(leftCI);
+        const rx = candleX(rightCI) + CW;
+        const profileW = Math.min(rx - lx, (rx - lx) * 0.7); // bars fill up to 70% of range width
+
+        ctx.setLineDash([4, 3]);
+        ctx.strokeStyle = "hsla(210,80%,65%,0.5)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(lx, 0); ctx.lineTo(lx, chartH);
+        ctx.moveTo(rx, 0); ctx.lineTo(rx, chartH);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Draw bars for each price level
+        pvMap.forEach(({ bid, ask, total }, price) => {
+          const py = priceToY(price);
+          const barH = Math.max(1, rowH - 1);
+          const barW = maxPV > 0 ? (total / maxPV) * profileW : 0;
+          const bidW = total > 0 ? (bid / total) * barW : 0;
+          const isPOC = price === pocPrice;
+
+          // Background bar
+          ctx.globalAlpha = isPOC ? 0.7 : 0.45;
+          ctx.fillStyle = settingsRef.current.bidColor;
+          ctx.fillRect(lx, py - barH / 2, bidW, barH);
+          ctx.fillStyle = settingsRef.current.askColor;
+          ctx.fillRect(lx + bidW, py - barH / 2, barW - bidW, barH);
+          ctx.globalAlpha = 1;
+
+          // POC highlight line
+          if (isPOC) {
+            ctx.strokeStyle = settingsRef.current.pocColor;
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(lx, py); ctx.lineTo(lx + profileW, py);
+            ctx.stroke();
+          }
+        });
+
+        // Label
+        ctx.font = "bold 9px monospace";
+        ctx.fillStyle = "hsla(210,80%,65%,0.8)";
+        ctx.textAlign = "left";
+        ctx.textBaseline = "top";
+        const totalVol = Array.from(pvMap.values()).reduce((s, v) => s + v.total, 0);
+        ctx.fillText(`FRVP  ${totalVol.toLocaleString()}`, lx + 3, 3);
       }
     });
 

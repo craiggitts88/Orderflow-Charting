@@ -84,6 +84,7 @@ const FootprintSettingsPanel: React.FC<FootprintSettingsPanelProps> = ({
         <ToggleRow label="Grid" checked={settings.showGrid} onChange={(v) => update({ showGrid: v })} />
         <ToggleRow label="Crosshair" checked={settings.showCrosshair} onChange={(v) => update({ showCrosshair: v })} />
         <ToggleRow label="Wicks" checked={settings.showWicks} onChange={(v) => update({ showWicks: v })} />
+        <ToggleRow label="Candle Body" checked={settings.showCandleBody} onChange={(v) => update({ showCandleBody: v })} />
         <ToggleRow label="Imbalance" checked={settings.highlightImbalance} onChange={(v) => update({ highlightImbalance: v })} />
       </div>
 
@@ -144,6 +145,8 @@ const FootprintSettingsPanel: React.FC<FootprintSettingsPanelProps> = ({
         <div className="grid grid-cols-2 gap-x-3 gap-y-2">
           <ColorRow label="Bid / Sell" value={settings.bidColor} onChange={(v) => update({ bidColor: v })} />
           <ColorRow label="Ask / Buy" value={settings.askColor} onChange={(v) => update({ askColor: v })} />
+          <ColorRow label="Bid Text" value={settings.bidTextColor} onChange={(v) => update({ bidTextColor: v })} />
+          <ColorRow label="Ask Text" value={settings.askTextColor} onChange={(v) => update({ askTextColor: v })} />
           <ColorRow label="POC" value={settings.pocColor} onChange={(v) => update({ pocColor: v })} />
           <ColorRow label="Imbalance" value={settings.imbalanceColor} onChange={(v) => update({ imbalanceColor: v })} />
           <ColorRow label="Up Wick" value={settings.upColor} onChange={(v) => update({ upColor: v })} />
