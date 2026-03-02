@@ -1,60 +1,72 @@
-﻿import React, { useRef, useEffect, useCallback, useState } from 'react';
-import { FootprintCandle } from '@/lib/mockData';
-import { FootprintSettings } from '@/lib/footprintSettings';
+﻿import React, { useRef, useEffect, useCallback } from "react";
+import { FootprintCandle } from "@/lib/mockData";
+import { FootprintSettings, DrawingTool } from "@/lib/footprintSettings";
 
 interface FootprintChartProps {
   candles: FootprintCandle[];
   settings: FootprintSettings;
-  /** shared offset in candle-index units (0 = fully right-aligned) */
-  offsetX?: number;
-  onOffsetXChange?: (v: number) => void;
 }
 
 interface ViewState {
-  /** How many candles are shifted left from the right edge (scroll position) */
   scrollOffset: number;
-  /** Zoom: candle width in pixels */
   candleWidth: number;
-  /** Vertical price offset in pixels (pan up/down) */
   priceOffset: number;
-  /** Vertical zoom multiplier */
   priceZoom: number;
+}
+
+interface Drawing {
+  id: number;
+  type: DrawingTool;
+  x1: number; y1: number;
+  x2: number; y2: number;
+  // for hline/vline only x1/y1 matters; price/candle stored as data coords
+  price1: number; price2: number;
+  time1: number; time2: number;
 }
 
 const PRICE_AXIS_W = 80;
 const TIME_AXIS_H = 28;
 const MIN_CANDLE_W = 20;
 const MAX_CANDLE_W = 400;
+let nextDrawingId = 1;
 
 const FootprintChart: React.FC<FootprintChartProps> = ({ candles, settings }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  //  IMPORTANT: store candles+settings in refs so render never captures stale values 
+  const candlesRef = useRef(candles);
+  const settingsRef = useRef(settings);
+
   const stateRef = useRef<ViewState>({
     scrollOffset: 0,
     candleWidth: settings.candleWidth,
     priceOffset: 0,
     priceZoom: 1,
   });
-  const dragRef = useRef<{ startX: number; startY: number; startScroll: number; startPriceOffset: number; active: boolean; button: number } | null>(null);
+
+  const dragRef = useRef<{
+    startX: number; startY: number;
+    startScroll: number; startPriceOffset: number;
+    active: boolean; button: number;
+  } | null>(null);
+
   const crosshairRef = useRef<{ x: number; y: number } | null>(null);
   const renderScheduled = useRef(false);
 
+  // Drawing state
+  const drawingsRef = useRef<Drawing[]>([]);
+  const activeDrawingRef = useRef<Drawing | null>(null);
 
-  // â”€â”€â”€ Render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const scheduleRender = useCallback(() => {
-    if (renderScheduled.current) return;
-    renderScheduled.current = true;
-    requestAnimationFrame(() => {
-      renderScheduled.current = false;
-      render();
-    });
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
+  //  Core render  reads from refs, no closure capture 
   const render = useCallback(() => {
+    const candles = candlesRef.current;
+    const settings = settingsRef.current;
     const canvas = canvasRef.current;
     const container = containerRef.current;
     if (!canvas || !container || candles.length === 0) return;
-    const ctx = canvas.getContext('2d');
+
+    const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
     const dpr = window.devicePixelRatio || 1;
@@ -73,15 +85,15 @@ const FootprintChart: React.FC<FootprintChartProps> = ({ candles, settings }) =>
     const chartW = W - PRICE_AXIS_W;
     const chartH = H - TIME_AXIS_H;
 
-    // â”€â”€ Visible candle range â”€â”€
+    //  Visible candles 
     const visibleCount = Math.ceil(chartW / CW) + 2;
-    const rightEdge = candles.length - scrollOffset;
+    const rightEdge = Math.max(0, candles.length - scrollOffset);
     const startIdx = Math.max(0, Math.floor(rightEdge - visibleCount));
-    const endIdx = Math.min(candles.length - 1, rightEdge);
+    const endIdx = Math.min(candles.length - 1, Math.ceil(rightEdge));
     const visibleCandles = candles.slice(startIdx, endIdx + 1);
     if (!visibleCandles.length) return;
 
-    // â”€â”€ Global price range from visible candles â”€â”€
+    //  Price range 
     let gHigh = -Infinity, gLow = Infinity, maxVol = 0;
     visibleCandles.forEach(c => {
       if (c.high > gHigh) gHigh = c.high;
@@ -92,62 +104,50 @@ const FootprintChart: React.FC<FootprintChartProps> = ({ candles, settings }) =>
     gHigh += pad; gLow -= pad;
     const priceRange = gHigh - gLow;
 
-    // â”€â”€ Price <-> Y with pan+zoom â”€â”€
-    const priceToY = (price: number) => {
-      const base = ((gHigh - price) / priceRange) * chartH * priceZoom;
-      return base + priceOffset;
-    };
-    const yToPrice = (y: number) => {
-      const base = (y - priceOffset) / priceZoom;
-      return gHigh - (base / chartH) * priceRange;
-    };
+    //  Coordinate transforms 
+    const priceToY = (price: number) =>
+      ((gHigh - price) / priceRange) * chartH * priceZoom + priceOffset;
 
-    // â”€â”€ Candle x-position (right-aligned) â”€â”€
-    const candleX = (candleIdx: number) => {
-      // rightmost candle ends at chartW
-      return chartW - (endIdx - candleIdx + 1) * CW;
-    };
+    const yToPrice = (y: number) =>
+      gHigh - ((y - priceOffset) / priceZoom / chartH) * priceRange;
 
-    // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    const candleX = (ci: number) => chartW - (endIdx - ci + 1) * CW;
+
+    const xToCandleIdx = (x: number) => startIdx + Math.floor(x / CW);
+
+    // 
     // BACKGROUND
-    ctx.fillStyle = 'hsl(220, 20%, 4%)';
+    ctx.fillStyle = "hsl(220,20%,4%)";
     ctx.fillRect(0, 0, W, H);
 
-    // â”€â”€ Grid â”€â”€
+    //  Grid 
     if (settings.showGrid) {
-      const step = settings.tickSize;
       ctx.lineWidth = 0.5;
+      const step = settings.tickSize;
       for (let p = Math.ceil(gLow / step) * step; p <= gHigh; p += step) {
         const y = priceToY(p);
         if (y < 0 || y > chartH) continue;
         const isWhole = Math.abs(Math.round(p) - p) < 0.001;
-        ctx.strokeStyle = isWhole ? 'hsl(220,14%,13%)' : 'hsl(220,14%,9%)';
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(chartW, y);
-        ctx.stroke();
+        ctx.strokeStyle = isWhole ? "hsl(220,14%,14%)" : "hsl(220,14%,9%)";
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(chartW, y); ctx.stroke();
       }
     }
 
-    // â”€â”€ Draw candles â”€â”€
+    const rowH = Math.max(2, (chartH * priceZoom) / Math.round(priceRange / settings.tickSize));
+
+    //  Draw each candle 
     visibleCandles.forEach((candle, i) => {
       const ci = startIdx + i;
       const x = candleX(ci);
       const midX = x + CW / 2;
       const innerW = CW - 2;
 
-      // Row height from zoom
-      const rowH = Math.max(2, (chartH * priceZoom) / Math.round(priceRange / settings.tickSize));
-
-      // vertical column separator
-      ctx.strokeStyle = 'hsl(220,14%,8%)';
+      // column separator
+      ctx.strokeStyle = "hsl(220,14%,8%)";
       ctx.lineWidth = 0.5;
-      ctx.beginPath();
-      ctx.moveTo(x + CW, 0);
-      ctx.lineTo(x + CW, chartH);
-      ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x + CW, 0); ctx.lineTo(x + CW, chartH); ctx.stroke();
 
-      // â”€â”€ Footprint rows â”€â”€
+      //  Footprint rows 
       candle.rows.forEach(row => {
         const y = priceToY(row.price);
         if (y + rowH / 2 < 0 || y - rowH / 2 > chartH) return;
@@ -157,31 +157,36 @@ const FootprintChart: React.FC<FootprintChartProps> = ({ candles, settings }) =>
         const bidBarW = maxVol > 0 ? (row.bidVolume / maxVol) * halfW : 0;
         const askBarW = maxVol > 0 ? (row.askVolume / maxVol) * halfW : 0;
 
-        // Heatmap background
-        if (settings.colorMode === 'heatmap') {
-          const alpha = Math.min(0.25, vI * 0.3);
+        // Background color
+        if (settings.colorMode === "heatmap") {
+          const alpha = Math.min(0.3, vI * 0.35);
           ctx.fillStyle = row.delta > 0
             ? `hsla(165,100%,42%,${alpha})`
             : `hsla(354,70%,54%,${alpha})`;
           ctx.fillRect(x + 1, y - rowH / 2, innerW, rowH);
-        } else if (settings.colorMode === 'deltaFlow') {
+        } else if (settings.colorMode === "deltaFlow") {
           const dRatio = row.totalVolume > 0 ? row.delta / row.totalVolume : 0;
-          const h = dRatio > 0 ? 165 : 354;
-          ctx.fillStyle = `hsla(${h},80%,45%,${Math.abs(dRatio) * 0.4})`;
+          ctx.fillStyle = `hsla(${dRatio > 0 ? 165 : 354},80%,45%,${Math.min(0.5, Math.abs(dRatio) * 0.6)})`;
+          ctx.fillRect(x + 1, y - rowH / 2, innerW, rowH);
+        } else if (settings.colorMode === "gradient") {
+          ctx.fillStyle = `hsla(210,60%,50%,${vI * 0.3})`;
+          ctx.fillRect(x + 1, y - rowH / 2, innerW, rowH);
+        } else if (settings.colorMode === "solid") {
+          ctx.fillStyle = "hsla(210,20%,20%,0.4)";
           ctx.fillRect(x + 1, y - rowH / 2, innerW, rowH);
         }
 
-        // Volume bars
-        ctx.fillStyle = 'hsla(165,100%,42%,0.22)';
+        // Volume bars (bid left, ask right of centre)
+        ctx.fillStyle = "hsla(165,100%,42%,0.22)";
         ctx.fillRect(midX - bidBarW, y - rowH / 2 + 1, bidBarW, rowH - 2);
-        ctx.fillStyle = 'hsla(354,70%,54%,0.22)';
+        ctx.fillStyle = "hsla(354,70%,54%,0.22)";
         ctx.fillRect(midX, y - rowH / 2 + 1, askBarW, rowH - 2);
 
         // POC
         if (row.price === candle.pocPrice && settings.showPOC) {
-          ctx.fillStyle = 'hsla(45,100%,55%,0.14)';
+          ctx.fillStyle = "hsla(45,100%,55%,0.14)";
           ctx.fillRect(x + 1, y - rowH / 2, innerW, rowH);
-          ctx.strokeStyle = 'hsla(45,100%,55%,0.6)';
+          ctx.strokeStyle = "hsla(45,100%,55%,0.65)";
           ctx.lineWidth = 1;
           ctx.strokeRect(x + 1, y - rowH / 2, innerW, rowH);
         }
@@ -191,127 +196,173 @@ const FootprintChart: React.FC<FootprintChartProps> = ({ candles, settings }) =>
           const ratio = Math.max(row.bidVolume / row.askVolume, row.askVolume / row.bidVolume);
           if (ratio >= settings.imbalanceRatio) {
             const isAsk = row.askVolume > row.bidVolume;
-            ctx.fillStyle = isAsk ? 'hsla(354,70%,54%,0.2)' : 'hsla(165,100%,42%,0.2)';
+            ctx.fillStyle = isAsk ? "hsla(354,70%,54%,0.25)" : "hsla(165,100%,42%,0.25)";
             ctx.fillRect(x + 1, y - rowH / 2, innerW, rowH);
           }
         }
 
-        // Only render text if rows are large enough
+        // Text  only when rows are big enough
         if (rowH >= settings.fontSize + 2) {
-          ctx.font = `${settings.fontSize}px "JetBrains Mono", monospace`;
-          ctx.textBaseline = 'middle';
+          ctx.font = `${settings.fontSize}px "JetBrains Mono",monospace`;
+          ctx.textBaseline = "middle";
 
-          if (settings.displayMode === 'bidAsk') {
-            const bidStr = row.bidVolume > settings.volumeFilter ? row.bidVolume.toString() : '';
-            const askStr = row.askVolume > settings.volumeFilter ? row.askVolume.toString() : '';
-            ctx.fillStyle = `hsl(165,100%,${45 + vI * 20}%)`;
-            ctx.textAlign = 'right';
-            ctx.fillText(bidStr, midX - 4, y);
+          if (settings.displayMode === "bidAsk") {
+            const bidStr = row.bidVolume > settings.volumeFilter ? row.bidVolume.toString() : "";
+            const askStr = row.askVolume > settings.volumeFilter ? row.askVolume.toString() : "";
+            ctx.fillStyle = `hsl(165,100%,${45 + vI * 22}%)`;
+            ctx.textAlign = "right"; ctx.fillText(bidStr, midX - 4, y);
             ctx.fillStyle = `hsl(354,70%,${50 + vI * 15}%)`;
-            ctx.textAlign = 'left';
-            ctx.fillText(askStr, midX + 4, y);
-            ctx.strokeStyle = 'hsl(220,14%,18%)';
+            ctx.textAlign = "left"; ctx.fillText(askStr, midX + 4, y);
+            // centre divider
+            ctx.strokeStyle = "hsl(220,14%,18%)";
             ctx.lineWidth = 0.5;
-            ctx.beginPath();
-            ctx.moveTo(midX, y - rowH / 2);
-            ctx.lineTo(midX, y + rowH / 2);
-            ctx.stroke();
-          } else if (settings.displayMode === 'delta') {
-            ctx.fillStyle = row.delta >= 0 ? 'hsl(165,100%,50%)' : 'hsl(354,70%,58%)';
-            ctx.textAlign = 'center';
-            ctx.fillText((row.delta > 0 ? '+' : '') + row.delta, midX, y);
-          } else if (settings.displayMode === 'totalVolume') {
+            ctx.beginPath(); ctx.moveTo(midX, y - rowH / 2); ctx.lineTo(midX, y + rowH / 2); ctx.stroke();
+
+          } else if (settings.displayMode === "delta") {
+            ctx.fillStyle = row.delta >= 0 ? "hsl(165,100%,50%)" : "hsl(354,70%,58%)";
+            ctx.textAlign = "center";
+            ctx.fillText((row.delta > 0 ? "+" : "") + row.delta, midX, y);
+
+          } else if (settings.displayMode === "totalVolume") {
             ctx.fillStyle = `hsl(210,20%,${50 + vI * 30}%)`;
-            ctx.textAlign = 'center';
+            ctx.textAlign = "center";
             ctx.fillText(row.totalVolume.toString(), midX, y);
-          } else if (settings.displayMode === 'trades') {
+
+          } else if (settings.displayMode === "trades") {
             ctx.fillStyle = `hsl(270,80%,${55 + vI * 20}%)`;
-            ctx.textAlign = 'center';
+            ctx.textAlign = "center";
             ctx.fillText(row.trades.toString(), midX, y);
-          } else if (settings.displayMode === 'bidAskDelta') {
-            ctx.fillStyle = 'hsl(165,100%,50%)';
-            ctx.textAlign = 'right';
-            ctx.fillText(row.bidVolume.toString(), x + CW * 0.32, y);
-            ctx.fillStyle = 'hsl(354,70%,58%)';
-            ctx.textAlign = 'left';
-            ctx.fillText(row.askVolume.toString(), x + CW * 0.35, y);
-            ctx.fillStyle = row.delta >= 0 ? 'hsl(165,100%,50%)' : 'hsl(354,70%,58%)';
-            ctx.textAlign = 'right';
-            ctx.fillText((row.delta > 0 ? '+' : '') + row.delta, x + CW - 4, y);
+
+          } else if (settings.displayMode === "bidAskDelta") {
+            const third = innerW / 3;
+            ctx.fillStyle = "hsl(165,100%,50%)";
+            ctx.textAlign = "center"; ctx.fillText(row.bidVolume.toString(), x + third * 0.5 + 1, y);
+            ctx.fillStyle = "hsl(354,70%,58%)";
+            ctx.fillText(row.askVolume.toString(), x + third * 1.5 + 1, y);
+            ctx.fillStyle = row.delta >= 0 ? "hsl(165,100%,50%)" : "hsl(354,70%,58%)";
+            ctx.fillText((row.delta > 0 ? "+" : "") + row.delta, x + third * 2.5 + 1, y);
           }
         }
       });
 
-      // Candle OHLC wick
+      //  OHLC Wicks 
       if (settings.showWicks) {
-        const openY = priceToY(candle.open);
-        const closeY = priceToY(candle.close);
         const highY = priceToY(candle.high);
         const lowY = priceToY(candle.low);
+        const openY = priceToY(candle.open);
+        const closeY = priceToY(candle.close);
         const isBull = candle.close >= candle.open;
-        ctx.strokeStyle = isBull ? 'hsla(165,100%,50%,0.7)' : 'hsla(354,70%,54%,0.7)';
+        ctx.strokeStyle = isBull ? "hsla(165,100%,50%,0.7)" : "hsla(354,70%,54%,0.7)";
         ctx.lineWidth = 1;
-        const bodyTop = Math.min(openY, closeY);
-        const bodyBot = Math.max(openY, closeY);
         ctx.beginPath();
-        ctx.moveTo(midX, highY);
-        ctx.lineTo(midX, bodyTop);
-        ctx.moveTo(midX, bodyBot);
-        ctx.lineTo(midX, lowY);
+        ctx.moveTo(midX, highY); ctx.lineTo(midX, Math.min(openY, closeY));
+        ctx.moveTo(midX, Math.max(openY, closeY)); ctx.lineTo(midX, lowY);
         ctx.stroke();
       }
 
-      // Delta footer
+      //  Per-candle delta footer 
       if (settings.showDelta && rowH >= 8) {
-        const dText = (candle.totalDelta > 0 ? '+' : '') + candle.totalDelta;
-        ctx.font = `bold ${settings.fontSize - 1}px "JetBrains Mono", monospace`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'bottom';
-        ctx.fillStyle = candle.totalDelta >= 0 ? 'hsl(165,100%,50%)' : 'hsl(354,70%,58%)';
-        ctx.fillText(dText, midX, chartH - 2);
+        ctx.font = `bold ${Math.max(8, settings.fontSize - 1)}px "JetBrains Mono",monospace`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "bottom";
+        ctx.fillStyle = candle.totalDelta >= 0 ? "hsl(165,100%,50%)" : "hsl(354,70%,58%)";
+        ctx.fillText((candle.totalDelta > 0 ? "+" : "") + candle.totalDelta, midX, chartH - 2);
       }
     });
 
-    // â”€â”€ Volume Profile â”€â”€
+    //  Volume Profile 
     if (settings.showVolumeProfile) {
       const priceVols = new Map<number, { bid: number; ask: number }>();
       visibleCandles.forEach(c => c.rows.forEach(r => {
         const e = priceVols.get(r.price) ?? { bid: 0, ask: 0 };
         priceVols.set(r.price, { bid: e.bid + r.bidVolume, ask: e.ask + r.askVolume });
       }));
-      const maxPVol = Math.max(...Array.from(priceVols.values()).map(v => v.bid + v.ask));
+      const maxPV = Math.max(...Array.from(priceVols.values()).map(v => v.bid + v.ask));
       const profW = PRICE_AXIS_W - 8;
       priceVols.forEach(({ bid, ask }, price) => {
         const y = priceToY(price);
-        const rowH2 = Math.max(1, (chartH * priceZoom) / Math.round(priceRange / settings.tickSize));
+        const rh2 = Math.max(1, rowH);
         const total = bid + ask;
-        const bw = (total / maxPVol) * profW;
+        const bw = (total / maxPV) * profW;
         const bidW = (bid / total) * bw;
-        ctx.fillStyle = 'hsla(165,100%,42%,0.3)';
-        ctx.fillRect(chartW + 2, y - rowH2 / 2 + 1, bidW, rowH2 - 2);
-        ctx.fillStyle = 'hsla(354,70%,54%,0.3)';
-        ctx.fillRect(chartW + 2 + bidW, y - rowH2 / 2 + 1, bw - bidW, rowH2 - 2);
+        ctx.fillStyle = "hsla(165,100%,42%,0.3)";
+        ctx.fillRect(chartW, y - rh2 / 2 + 1, bidW, rh2 - 2);
+        ctx.fillStyle = "hsla(354,70%,54%,0.3)";
+        ctx.fillRect(chartW + bidW, y - rh2 / 2 + 1, bw - bidW, rh2 - 2);
       });
     }
 
-    // â”€â”€ Price axis â”€â”€
-    ctx.fillStyle = 'hsl(220,18%,6%)';
+    //  Drawings 
+    const allDrawings = [...drawingsRef.current, ...(activeDrawingRef.current ? [activeDrawingRef.current] : [])];
+    allDrawings.forEach(d => {
+      const y1 = priceToY(d.price1);
+      const y2 = priceToY(d.price2);
+      const x1 = candleX(d.time1);
+      const x2 = candleX(d.time2);
+      ctx.strokeStyle = "hsl(45,100%,65%)";
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      if (d.type === "hline") {
+        ctx.setLineDash([5, 4]);
+        ctx.moveTo(0, y1); ctx.lineTo(chartW, y1);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.font = "10px monospace";
+        ctx.fillStyle = "hsl(45,100%,65%)";
+        ctx.textAlign = "right"; ctx.textBaseline = "bottom";
+        ctx.fillText(d.price1.toFixed(2), chartW - 2, y1 - 1);
+      } else if (d.type === "vline") {
+        ctx.moveTo(x1 + CW / 2, 0); ctx.lineTo(x1 + CW / 2, chartH);
+        ctx.stroke();
+      } else if (d.type === "line") {
+        ctx.moveTo(x1 + CW / 2, y1); ctx.lineTo(x2 + CW / 2, y2);
+        ctx.stroke();
+      } else if (d.type === "rectangle") {
+        const rx = Math.min(x1, x2) + CW / 2;
+        const ry = Math.min(y1, y2);
+        const rw = Math.abs(x2 - x1);
+        const rh = Math.abs(y2 - y1);
+        ctx.strokeRect(rx, ry, rw, rh);
+        ctx.fillStyle = "hsla(45,100%,55%,0.06)";
+        ctx.fillRect(rx, ry, rw, rh);
+      } else if (d.type === "fib") {
+        const fibLevels = [0, 0.236, 0.382, 0.5, 0.618, 0.764, 1];
+        const high = Math.max(y1, y2);
+        const low = Math.min(y1, y2);
+        const range = high - low;
+        fibLevels.forEach((level, li) => {
+          const fy = low + range * level;
+          ctx.strokeStyle = li === 0 || li === fibLevels.length - 1
+            ? "hsla(45,100%,65%,0.9)" : "hsla(45,100%,65%,0.5)";
+          ctx.lineWidth = li === 0 || li === fibLevels.length - 1 ? 1 : 0.75;
+          ctx.setLineDash([4, 3]);
+          ctx.beginPath(); ctx.moveTo(Math.min(x1, x2) + CW / 2, fy);
+          ctx.lineTo(Math.max(x1, x2) + CW / 2, fy); ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.font = "9px monospace";
+          ctx.fillStyle = "hsl(45,100%,70%)";
+          ctx.textAlign = "left"; ctx.textBaseline = "bottom";
+          ctx.fillText(`${(level * 100).toFixed(1)}%`, Math.min(x1, x2) + CW / 2 + 2, fy - 1);
+        });
+      }
+    });
+
+    //  Price Axis 
+    ctx.fillStyle = "hsl(220,18%,6%)";
     ctx.fillRect(chartW, 0, PRICE_AXIS_W, chartH);
-    ctx.strokeStyle = 'hsl(220,14%,14%)';
+    ctx.strokeStyle = "hsl(220,14%,14%)";
     ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(chartW, 0); ctx.lineTo(chartW, chartH); ctx.stroke();
 
-    // Price labels â€” find a sensible step
     const pixPerTick = Math.abs(priceToY(0) - priceToY(settings.tickSize));
-    const labelEvery = Math.max(1, Math.ceil(18 / pixPerTick));
-    const step = settings.tickSize * labelEvery;
-
-    ctx.font = `${settings.fontSize}px "JetBrains Mono", monospace`;
-    ctx.fillStyle = 'hsl(210,20%,55%)';
-    ctx.textAlign = 'right';
-    ctx.textBaseline = 'middle';
-
-    for (let p = Math.ceil(gLow / step) * step; p <= gHigh; p += step) {
+    const labelEvery = Math.max(1, Math.ceil(18 / (pixPerTick || 1)));
+    const axisStep = settings.tickSize * labelEvery;
+    ctx.font = `${settings.fontSize}px "JetBrains Mono",monospace`;
+    ctx.fillStyle = "hsl(210,20%,55%)";
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    for (let p = Math.ceil(gLow / axisStep) * axisStep; p <= gHigh; p += axisStep) {
       const y = priceToY(p);
       if (y < 4 || y > chartH - 4) continue;
       ctx.fillText(p.toFixed(2), W - 4, y);
@@ -322,46 +373,47 @@ const FootprintChart: React.FC<FootprintChartProps> = ({ candles, settings }) =>
     if (lastC) {
       const lY = priceToY(lastC.close);
       const bull = lastC.close >= lastC.open;
-      ctx.fillStyle = bull ? 'hsl(165,100%,38%)' : 'hsl(354,70%,50%)';
+      ctx.fillStyle = bull ? "hsl(165,100%,35%)" : "hsl(354,70%,45%)";
       ctx.fillRect(chartW, lY - 9, PRICE_AXIS_W, 18);
-      ctx.fillStyle = 'hsl(220,20%,4%)';
-      ctx.font = `bold ${settings.fontSize}px "JetBrains Mono", monospace`;
-      ctx.textAlign = 'right';
+      ctx.fillStyle = "hsl(220,20%,95%)";
+      ctx.font = `bold ${settings.fontSize}px "JetBrains Mono",monospace`;
+      ctx.textAlign = "right";
+      ctx.textBaseline = "middle";
       ctx.fillText(lastC.close.toFixed(2), W - 4, lY);
       ctx.setLineDash([4, 4]);
-      ctx.strokeStyle = bull ? 'hsla(165,100%,42%,0.35)' : 'hsla(354,70%,54%,0.35)';
+      ctx.strokeStyle = bull ? "hsla(165,100%,42%,0.35)" : "hsla(354,70%,54%,0.35)";
       ctx.lineWidth = 0.5;
       ctx.beginPath(); ctx.moveTo(0, lY); ctx.lineTo(chartW, lY); ctx.stroke();
       ctx.setLineDash([]);
     }
 
-    // â”€â”€ Time axis â”€â”€
-    ctx.fillStyle = 'hsl(220,18%,5%)';
+    //  Time Axis 
+    ctx.fillStyle = "hsl(220,18%,5%)";
     ctx.fillRect(0, chartH, W, TIME_AXIS_H);
-    ctx.strokeStyle = 'hsl(220,14%,12%)';
+    ctx.strokeStyle = "hsl(220,14%,12%)";
     ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(0, chartH); ctx.lineTo(W, chartH); ctx.stroke();
-    ctx.font = `${settings.fontSize - 1}px "JetBrains Mono", monospace`;
-    ctx.fillStyle = 'hsl(215,12%,40%)';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'top';
+
     const showEvery = Math.max(1, Math.ceil(60 / CW));
+    ctx.font = `${Math.max(8, settings.fontSize - 1)}px "JetBrains Mono",monospace`;
+    ctx.fillStyle = "hsl(215,12%,40%)";
+    ctx.textAlign = "center"; ctx.textBaseline = "top";
     visibleCandles.forEach((c, i) => {
       if (i % showEvery !== 0) return;
       const ci = startIdx + i;
       const tx = candleX(ci) + CW / 2;
-      if (tx < 0 || tx > chartW) return;
+      if (tx < 4 || tx > chartW - 4) return;
       const d = new Date(c.timestamp);
-      const label = `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+      const label = `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
       ctx.fillText(label, tx, chartH + 7);
     });
 
-    // â”€â”€ Crosshair â”€â”€
+    //  Crosshair 
     if (settings.showCrosshair && crosshairRef.current) {
       const { x: cx, y: cy } = crosshairRef.current;
       if (cx >= 0 && cx <= chartW && cy >= 0 && cy <= chartH) {
         ctx.setLineDash([3, 3]);
-        ctx.strokeStyle = 'hsla(210,20%,60%,0.5)';
+        ctx.strokeStyle = "hsla(210,20%,60%,0.5)";
         ctx.lineWidth = 0.75;
         ctx.beginPath();
         ctx.moveTo(cx, 0); ctx.lineTo(cx, chartH);
@@ -369,152 +421,290 @@ const FootprintChart: React.FC<FootprintChartProps> = ({ candles, settings }) =>
         ctx.stroke();
         ctx.setLineDash([]);
 
-        // Price label on axis
-        const crossPrice = yToPrice(cy);
-        ctx.fillStyle = 'hsl(210,40%,25%)';
+        // Price label
+        const cp = yToPrice(cy);
+        ctx.fillStyle = "hsl(210,40%,22%)";
         ctx.fillRect(chartW, cy - 9, PRICE_AXIS_W, 18);
-        ctx.strokeStyle = 'hsl(210,40%,40%)';
+        ctx.strokeStyle = "hsl(210,60%,45%)";
         ctx.lineWidth = 0.5;
         ctx.strokeRect(chartW, cy - 9, PRICE_AXIS_W, 18);
-        ctx.fillStyle = 'hsl(210,60%,80%)';
-        ctx.font = `${settings.fontSize}px "JetBrains Mono", monospace`;
-        ctx.textAlign = 'right';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(crossPrice.toFixed(2), W - 4, cy);
+        ctx.fillStyle = "hsl(210,60%,82%)";
+        ctx.font = `${settings.fontSize}px "JetBrains Mono",monospace`;
+        ctx.textAlign = "right"; ctx.textBaseline = "middle";
+        ctx.fillText(cp.toFixed(2), W - 4, cy);
 
-        // Time label on axis
-        const candleIdx = Math.floor((cx) / CW);
-        const ci = startIdx + candleIdx;
-        if (ci >= 0 && ci < candles.length) {
-          const d = new Date(candles[ci].timestamp);
-          const tLabel = `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
-          const lw = ctx.measureText(tLabel).width + 10;
-          ctx.fillStyle = 'hsl(210,40%,25%)';
+        // Time label
+        const hoverCI = xToCandleIdx(cx);
+        if (hoverCI >= 0 && hoverCI < candles.length) {
+          const d = new Date(candles[hoverCI].timestamp);
+          const tl = `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
+          const lw = ctx.measureText(tl).width + 10;
+          ctx.fillStyle = "hsl(210,40%,22%)";
           ctx.fillRect(cx - lw / 2, chartH, lw, TIME_AXIS_H - 2);
-          ctx.strokeStyle = 'hsl(210,40%,40%)';
+          ctx.strokeStyle = "hsl(210,60%,45%)";
           ctx.lineWidth = 0.5;
           ctx.strokeRect(cx - lw / 2, chartH, lw, TIME_AXIS_H - 2);
-          ctx.fillStyle = 'hsl(210,60%,80%)';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'top';
-          ctx.fillText(tLabel, cx, chartH + 7);
+          ctx.fillStyle = "hsl(210,60%,82%)";
+          ctx.textAlign = "center"; ctx.textBaseline = "top";
+          ctx.fillText(tl, cx, chartH + 7);
         }
       }
     }
-  }, [candles, settings]);
+  }, []); // EMPTY deps  reads from refs, never stale
 
-  // â”€â”€â”€ Mouse / wheel events â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  //  Schedule helper (stable, always calls latest render via closure) 
+  const scheduleRender = useCallback(() => {
+    if (renderScheduled.current) return;
+    renderScheduled.current = true;
+    requestAnimationFrame(() => {
+      renderScheduled.current = false;
+      render();
+    });
+  }, [render]); // depends on render, but render has empty deps so this is stable too
+
+  //  Keep refs current and re-render when props change 
+  useEffect(() => {
+    candlesRef.current = candles;
+    scheduleRender();
+  }, [candles, scheduleRender]);
+
+  useEffect(() => {
+    settingsRef.current = settings;
+    stateRef.current.candleWidth = settings.candleWidth;
+    scheduleRender();
+  }, [settings, scheduleRender]);
+
+  //  Mouse / Wheel events 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
+    const getCanvasPos = (e: MouseEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    };
+
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       const s = stateRef.current;
-
+      const canvasLen = candlesRef.current.length;
       if (e.ctrlKey) {
-        // Ctrl+wheel â†’ vertical zoom
-        const delta = e.deltaY > 0 ? 0.9 : 1.1;
-        s.priceZoom = Math.max(0.2, Math.min(20, s.priceZoom * delta));
+        s.priceZoom = Math.max(0.2, Math.min(20, s.priceZoom * (e.deltaY > 0 ? 0.9 : 1.1)));
       } else if (e.shiftKey) {
-        // Shift+wheel â†’ pan left/right by candles
-        s.scrollOffset = Math.max(0, Math.min(candles.length - 5, s.scrollOffset + (e.deltaY > 0 ? -3 : 3)));
+        s.scrollOffset = Math.max(0, Math.min(canvasLen - 5, s.scrollOffset + (e.deltaY > 0 ? -3 : 3)));
       } else {
-        // Wheel â†’ horizontal zoom (candle width)
-        const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
-        s.candleWidth = Math.max(MIN_CANDLE_W, Math.min(MAX_CANDLE_W, s.candleWidth * zoomFactor));
+        s.candleWidth = Math.max(MIN_CANDLE_W, Math.min(MAX_CANDLE_W, s.candleWidth * (e.deltaY < 0 ? 1.1 : 0.9)));
       }
       scheduleRender();
     };
 
     const onMouseDown = (e: MouseEvent) => {
-      dragRef.current = {
-        startX: e.clientX,
-        startY: e.clientY,
-        startScroll: stateRef.current.scrollOffset,
-        startPriceOffset: stateRef.current.priceOffset,
-        active: true,
-        button: e.button,
-      };
-      canvas.style.cursor = 'grabbing';
+      e.preventDefault();
+      const { x, y } = getCanvasPos(e);
+      const tool = settingsRef.current.activeDrawingTool;
+
+      if (e.button === 0 && tool !== "cursor" && tool !== "crosshair") {
+        // Start a new drawing
+        const CW = stateRef.current.candleWidth;
+        const container = containerRef.current;
+        if (!container) return;
+        const W = container.clientWidth;
+        const H = container.clientHeight;
+        const chartW = W - PRICE_AXIS_W;
+        const chartH = H - TIME_AXIS_H;
+
+        const candles = candlesRef.current;
+        const settings = settingsRef.current;
+        const { scrollOffset, priceOffset, priceZoom } = stateRef.current;
+        const visibleCount = Math.ceil(chartW / CW) + 2;
+        const rightEdge = Math.max(0, candles.length - scrollOffset);
+        const startIdx = Math.max(0, Math.floor(rightEdge - visibleCount));
+        const endIdx = Math.min(candles.length - 1, Math.ceil(rightEdge));
+
+        let gHigh = -Infinity, gLow = Infinity;
+        candles.slice(startIdx, endIdx + 1).forEach(c => {
+          if (c.high > gHigh) gHigh = c.high;
+          if (c.low < gLow) gLow = c.low;
+        });
+        gHigh += settings.tickSize * 4; gLow -= settings.tickSize * 4;
+        const priceRange = gHigh - gLow;
+        const yToPrice = (yp: number) => gHigh - ((yp - priceOffset) / priceZoom / chartH) * priceRange;
+        const candleX = (ci: number) => chartW - (endIdx - ci + 1) * CW;
+        const xToCandleIdx = (xp: number) => startIdx + Math.floor(xp / CW);
+
+        const price = yToPrice(y);
+        const ci = xToCandleIdx(x);
+
+        activeDrawingRef.current = {
+          id: nextDrawingId++,
+          type: tool,
+          x1: x, y1: y, x2: x, y2: y,
+          price1: price, price2: price,
+          time1: ci, time2: ci,
+        };
+        canvas.style.cursor = "crosshair";
+      } else {
+        // Pan mode
+        dragRef.current = {
+          startX: e.clientX, startY: e.clientY,
+          startScroll: stateRef.current.scrollOffset,
+          startPriceOffset: stateRef.current.priceOffset,
+          active: true, button: e.button,
+        };
+        canvas.style.cursor = e.button === 2 ? "ns-resize" : "grabbing";
+      }
     };
 
     const onMouseMove = (e: MouseEvent) => {
-      const rect = canvas.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
+      const { x, y } = getCanvasPos(e);
       crosshairRef.current = { x, y };
 
-      if (dragRef.current?.active) {
+      if (activeDrawingRef.current) {
+        // Update in-progress drawing end point
+        const CW = stateRef.current.candleWidth;
+        const container = containerRef.current;
+        if (!container) return;
+        const W = container.clientWidth;
+        const H = container.clientHeight;
+        const chartW = W - PRICE_AXIS_W;
+        const chartH = H - TIME_AXIS_H;
+        const candles = candlesRef.current;
+        const settings = settingsRef.current;
+        const { scrollOffset, priceOffset, priceZoom } = stateRef.current;
+        const visibleCount = Math.ceil(chartW / CW) + 2;
+        const rightEdge = Math.max(0, candles.length - scrollOffset);
+        const startIdx = Math.max(0, Math.floor(rightEdge - visibleCount));
+        const endIdx = Math.min(candles.length - 1, Math.ceil(rightEdge));
+        let gHigh = -Infinity, gLow = Infinity;
+        candles.slice(startIdx, endIdx + 1).forEach(c => {
+          if (c.high > gHigh) gHigh = c.high;
+          if (c.low < gLow) gLow = c.low;
+        });
+        gHigh += settings.tickSize * 4; gLow -= settings.tickSize * 4;
+        const priceRange = gHigh - gLow;
+        const yToPrice = (yp: number) => gHigh - ((yp - priceOffset) / priceZoom / chartH) * priceRange;
+        const xToCandleIdx = (xp: number) => startIdx + Math.floor(xp / CW);
+
+        activeDrawingRef.current.x2 = x;
+        activeDrawingRef.current.y2 = y;
+        activeDrawingRef.current.price2 = yToPrice(y);
+        activeDrawingRef.current.time2 = xToCandleIdx(x);
+      } else if (dragRef.current?.active) {
         const dx = e.clientX - dragRef.current.startX;
         const dy = e.clientY - dragRef.current.startY;
         const s = stateRef.current;
-
+        const canvasLen = candlesRef.current.length;
         if (dragRef.current.button === 0) {
-          // Left drag â†’ scroll horizontally + pan vertically
-          const candlesScrolled = -dx / s.candleWidth;
-          s.scrollOffset = Math.max(0, Math.min(candles.length - 5, dragRef.current.startScroll + candlesScrolled));
+          s.scrollOffset = Math.max(0, Math.min(canvasLen - 5, dragRef.current.startScroll - dx / s.candleWidth));
           s.priceOffset = dragRef.current.startPriceOffset + dy;
         } else if (dragRef.current.button === 2) {
-          // Right drag â†’ vertical zoom
-          const zf = 1 + dy * 0.005;
-          s.priceZoom = Math.max(0.2, Math.min(20, s.priceZoom * zf));
+          s.priceZoom = Math.max(0.2, Math.min(20, s.priceZoom * (1 + dy * 0.005)));
           dragRef.current.startY = e.clientY;
         }
       }
       scheduleRender();
     };
 
-    const onMouseUp = () => {
-      dragRef.current = null;
-      canvas.style.cursor = 'crosshair';
+    const onMouseUp = (e: MouseEvent) => {
+      if (activeDrawingRef.current) {
+        // Commit drawing if it has meaningful size
+        const d = activeDrawingRef.current;
+        const significant = Math.abs(d.x2 - d.x1) > 3 || Math.abs(d.y2 - d.y1) > 3;
+        if (significant || d.type === "hline" || d.type === "vline") {
+          drawingsRef.current = [...drawingsRef.current, d];
+        }
+        activeDrawingRef.current = null;
+        canvas.style.cursor = "crosshair";
+      } else {
+        dragRef.current = null;
+        const tool = settingsRef.current.activeDrawingTool;
+        canvas.style.cursor = tool === "cursor" ? "default" : "crosshair";
+      }
+      scheduleRender();
     };
 
     const onMouseLeave = () => {
       crosshairRef.current = null;
       dragRef.current = null;
-      canvas.style.cursor = 'default';
       scheduleRender();
     };
 
     const onDblClick = () => {
-      // Double-click resets zoom/pan
       stateRef.current.priceOffset = 0;
       stateRef.current.priceZoom = 1;
       stateRef.current.scrollOffset = 0;
       scheduleRender();
     };
 
-    const onContextMenu = (e: MouseEvent) => e.preventDefault();
-
-    canvas.addEventListener('wheel', onWheel, { passive: false });
-    canvas.addEventListener('mousedown', onMouseDown);
-    canvas.addEventListener('mousemove', onMouseMove);
-    canvas.addEventListener('mouseup', onMouseUp);
-    canvas.addEventListener('mouseleave', onMouseLeave);
-    canvas.addEventListener('dblclick', onDblClick);
-    canvas.addEventListener('contextmenu', onContextMenu);
-    return () => {
-      canvas.removeEventListener('wheel', onWheel);
-      canvas.removeEventListener('mousedown', onMouseDown);
-      canvas.removeEventListener('mousemove', onMouseMove);
-      canvas.removeEventListener('mouseup', onMouseUp);
-      canvas.removeEventListener('mouseleave', onMouseLeave);
-      canvas.removeEventListener('dblclick', onDblClick);
-      canvas.removeEventListener('contextmenu', onContextMenu);
+    const onContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+      // Right-click on a drawing to delete it (basic)
+      const { x, y } = getCanvasPos(e);
+      drawingsRef.current = drawingsRef.current.filter(d => {
+        if (d.type === "hline") {
+          const container = containerRef.current;
+          if (!container) return true;
+          const candles = candlesRef.current;
+          const settings = settingsRef.current;
+          const H = container.clientHeight;
+          const chartH = H - TIME_AXIS_H;
+          const { scrollOffset, priceOffset, priceZoom } = stateRef.current;
+          const W = container.clientWidth;
+          const chartW = W - PRICE_AXIS_W;
+          const CW = stateRef.current.candleWidth;
+          const visibleCount = Math.ceil(chartW / CW) + 2;
+          const rightEdge = Math.max(0, candles.length - scrollOffset);
+          const endIdx = Math.min(candles.length - 1, Math.ceil(rightEdge));
+          const startIdx = Math.max(0, Math.floor(rightEdge - visibleCount));
+          let gHigh = -Infinity, gLow = Infinity;
+          candles.slice(startIdx, endIdx + 1).forEach(c => {
+            if (c.high > gHigh) gHigh = c.high;
+            if (c.low < gLow) gLow = c.low;
+          });
+          gHigh += settings.tickSize * 4; gLow -= settings.tickSize * 4;
+          const priceRange = gHigh - gLow;
+          const lineY = ((gHigh - d.price1) / priceRange) * chartH * priceZoom + priceOffset;
+          return Math.abs(lineY - y) > 8;
+        }
+        return true;
+      });
+      scheduleRender();
     };
-  }, [candles, scheduleRender]);
 
-  // Sync candleWidth setting â†’ stateRef
-  useEffect(() => {
-    stateRef.current.candleWidth = settings.candleWidth;
-    scheduleRender();
-  }, [settings.candleWidth, scheduleRender]);
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        // Cancel in-progress drawing
+        activeDrawingRef.current = null;
+        scheduleRender();
+      }
+      if (e.key === "Delete" || e.key === "Backspace") {
+        // Clear all drawings
+        drawingsRef.current = [];
+        scheduleRender();
+      }
+    };
 
-  // Re-render whenever candles or settings change
-  useEffect(() => { scheduleRender(); }, [candles, settings, scheduleRender]);
+    canvas.addEventListener("wheel", onWheel, { passive: false });
+    canvas.addEventListener("mousedown", onMouseDown);
+    canvas.addEventListener("mousemove", onMouseMove);
+    canvas.addEventListener("mouseup", onMouseUp);
+    canvas.addEventListener("mouseleave", onMouseLeave);
+    canvas.addEventListener("dblclick", onDblClick);
+    canvas.addEventListener("contextmenu", onContextMenu);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      canvas.removeEventListener("wheel", onWheel);
+      canvas.removeEventListener("mousedown", onMouseDown);
+      canvas.removeEventListener("mousemove", onMouseMove);
+      canvas.removeEventListener("mouseup", onMouseUp);
+      canvas.removeEventListener("mouseleave", onMouseLeave);
+      canvas.removeEventListener("dblclick", onDblClick);
+      canvas.removeEventListener("contextmenu", onContextMenu);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [scheduleRender]); // only depends on scheduleRender (which is stable)
 
-  // Resize observer
+  //  Resize observer 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -525,7 +715,7 @@ const FootprintChart: React.FC<FootprintChartProps> = ({ candles, settings }) =>
 
   return (
     <div ref={containerRef} className="w-full h-full overflow-hidden relative select-none">
-      <canvas ref={canvasRef} className="block" style={{ cursor: 'crosshair' }} />
+      <canvas ref={canvasRef} className="block" style={{ cursor: "crosshair" }} />
     </div>
   );
 };
