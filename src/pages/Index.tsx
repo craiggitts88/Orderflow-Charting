@@ -34,6 +34,13 @@ const Index = () => {
   // Which candles to display
   const displayCandles = dataSource === 'live' ? liveCandles : candles;
 
+  // Sync tickSize from symbol config when in live mode
+  useEffect(() => {
+    if (dataSource === 'live') {
+      setSettings(s => ({ ...s, tickSize: symbolConfig.tickSize }));
+    }
+  }, [symbol, dataSource, symbolConfig.tickSize]);
+
   const handleTimeframeChange = useCallback((tf: string) => {
     setTimeframe(tf);
     setCandles(generateFootprintCandles(CANDLE_COUNT, tf));
@@ -110,8 +117,13 @@ const Index = () => {
           <Panel defaultSize={settingsOpen ? 82 : 100} minSize={50} className="flex flex-col min-h-0">
             <PanelGroup direction="vertical" className="h-full">
               {/* Footprint chart */}
-              <Panel defaultSize={settings.showCVD ? 75 : 100} minSize={40} className="min-h-0">
+              <Panel defaultSize={settings.showCVD ? 75 : 100} minSize={40} className="min-h-0 relative">
                 <FootprintChart candles={displayCandles} settings={settings} timeframe={timeframe} />
+                {dataSource === 'live' && feedStatus === 'connecting' && displayCandles.length === 0 && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-background/70 text-muted-foreground text-xs font-mono pointer-events-none">
+                    Fetching {symbol.toUpperCase()} history…
+                  </div>
+                )}
               </Panel>
 
               {/* CVD sub-chart */}
