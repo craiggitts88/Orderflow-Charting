@@ -29,10 +29,15 @@ const PRICE_AXIS_W = 80;
 const TIME_AXIS_H = 28;
 const MIN_CANDLE_W = 20;
 
-/** Format a volume/delta number without floating-point noise */
+/** Format a volume/delta number — match TradingView base-asset display */
 function fmtVol(v: number): string {
-  const r = Math.round(v);
-  return Math.abs(r) >= 1000 ? r.toLocaleString() : r.toString();
+  const abs = Math.abs(v);
+  const sign = v < 0 ? '-' : '';
+  if (abs >= 10000) return sign + Math.round(abs).toLocaleString();
+  if (abs >= 100)   return sign + Math.round(abs).toString();
+  if (abs >= 10)    return sign + abs.toFixed(1);
+  if (abs >= 1)     return sign + abs.toFixed(2);
+  return sign + abs.toFixed(3);
 }
 const MAX_CANDLE_W = 400;
 let nextDrawingId = 1;

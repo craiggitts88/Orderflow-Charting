@@ -169,14 +169,13 @@ export function useBinanceFeed(
           if (!alive) return;
           const msg       = JSON.parse(evt.data as string);
           const price     = parseFloat(msg.p);
-          const qty       = parseFloat(msg.q);
+          const qty       = parseFloat(msg.q);   // base asset qty (e.g. BTC), not USDT
           const isSell    = msg.m as boolean;
           const tradeTime = msg.T as number;
 
           const s           = stateRef.current;
           const candleStart = Math.floor(tradeTime / s.period) * s.period;
-          // Use USDT notional rounded to integer
-          const volume      = Math.max(1, Math.round(price * qty));
+          const volume      = qty;   // use raw base asset quantity
           const bPrice      = bucketPrice(price, s.tickSize);
 
           if (!s.open || s.open.timestamp !== candleStart) {
