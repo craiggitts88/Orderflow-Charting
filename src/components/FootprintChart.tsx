@@ -229,16 +229,7 @@ const FootprintChart: React.FC<FootprintChartProps> = ({ candles, settings, time
           && row.bidVolume > 0 && row.askVolume > 0
           && Math.max(row.bidVolume / row.askVolume, row.askVolume / row.bidVolume) >= settings.imbalanceRatio;
 
-        if (isImbalanced) {
-          ctx.globalAlpha = 0.22;
-          ctx.fillStyle = settings.imbalanceColor;
-          ctx.fillRect(x + 1, y - rowH / 2, innerW, rowH);
-          ctx.globalAlpha = 0.7;
-          ctx.strokeStyle = settings.imbalanceColor;
-          ctx.lineWidth = 1;
-          ctx.strokeRect(x + 1, y - rowH / 2, innerW, rowH);
-          ctx.globalAlpha = 1;
-        }
+        // imbalance: text-only highlight, no background or border
 
         // ── Text ──────────────────────────────────────────────────────────────
         if (rowH >= settings.fontSize + 2) {
