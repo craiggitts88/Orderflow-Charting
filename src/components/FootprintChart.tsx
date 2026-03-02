@@ -30,6 +30,21 @@ const MIN_CANDLE_W = 20;
 const MAX_CANDLE_W = 400;
 let nextDrawingId = 1;
 
+// Helper: rounded rect path
+function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.arcTo(x + w, y, x + w, y + r, r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+  ctx.lineTo(x + r, y + h);
+  ctx.arcTo(x, y + h, x, y + h - r, r);
+  ctx.lineTo(x, y + r);
+  ctx.arcTo(x, y, x + r, y, r);
+  ctx.closePath();
+}
+
 const FootprintChart: React.FC<FootprintChartProps> = ({ candles, settings }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -157,29 +172,29 @@ const FootprintChart: React.FC<FootprintChartProps> = ({ candles, settings }) =>
         const bidBarW = maxVol > 0 ? (row.bidVolume / maxVol) * halfW : 0;
         const askBarW = maxVol > 0 ? (row.askVolume / maxVol) * halfW : 0;
 
-        // Background color
+        // Background cell tint — kept subtle so histogram bars are visible on top
         if (settings.colorMode === "heatmap") {
-          const alpha = Math.min(0.3, vI * 0.35);
+          const alpha = Math.min(0.12, vI * 0.14);
           ctx.fillStyle = row.delta > 0
             ? `hsla(165,100%,42%,${alpha})`
             : `hsla(354,70%,54%,${alpha})`;
           ctx.fillRect(x + 1, y - rowH / 2, innerW, rowH);
         } else if (settings.colorMode === "deltaFlow") {
           const dRatio = row.totalVolume > 0 ? row.delta / row.totalVolume : 0;
-          ctx.fillStyle = `hsla(${dRatio > 0 ? 165 : 354},80%,45%,${Math.min(0.5, Math.abs(dRatio) * 0.6)})`;
+          ctx.fillStyle = `hsla(${dRatio > 0 ? 165 : 354},80%,45%,${Math.min(0.22, Math.abs(dRatio) * 0.28)})`;
           ctx.fillRect(x + 1, y - rowH / 2, innerW, rowH);
         } else if (settings.colorMode === "gradient") {
-          ctx.fillStyle = `hsla(210,60%,50%,${vI * 0.3})`;
+          ctx.fillStyle = `hsla(210,60%,50%,${vI * 0.12})`;
           ctx.fillRect(x + 1, y - rowH / 2, innerW, rowH);
         } else if (settings.colorMode === "solid") {
-          ctx.fillStyle = "hsla(210,20%,20%,0.4)";
+          ctx.fillStyle = "hsla(210,20%,20%,0.2)";
           ctx.fillRect(x + 1, y - rowH / 2, innerW, rowH);
         }
 
-        // Volume bars (bid left, ask right of centre)
-        ctx.fillStyle = "hsla(165,100%,42%,0.22)";
+        // Volume histogram bars — bid (SELL) = RED on left, ask (BUY) = GREEN on right
+        ctx.fillStyle = "hsla(354,80%,52%,0.52)";
         ctx.fillRect(midX - bidBarW, y - rowH / 2 + 1, bidBarW, rowH - 2);
-        ctx.fillStyle = "hsla(354,70%,54%,0.22)";
+        ctx.fillStyle = "hsla(145,90%,40%,0.52)";
         ctx.fillRect(midX, y - rowH / 2 + 1, askBarW, rowH - 2);
 
         // POC
@@ -191,13 +206,24 @@ const FootprintChart: React.FC<FootprintChartProps> = ({ candles, settings }) =>
           ctx.strokeRect(x + 1, y - rowH / 2, innerW, rowH);
         }
 
-        // Imbalance
+        // Imbalance highlight — normal tier + strong tier
         if (settings.highlightImbalance && row.bidVolume > 0 && row.askVolume > 0) {
           const ratio = Math.max(row.bidVolume / row.askVolume, row.askVolume / row.bidVolume);
           if (ratio >= settings.imbalanceRatio) {
-            const isAsk = row.askVolume > row.bidVolume;
-            ctx.fillStyle = isAsk ? "hsla(354,70%,54%,0.25)" : "hsla(165,100%,42%,0.25)";
-            ctx.fillRect(x + 1, y - rowH / 2, innerW, rowH);
+            const askDominant = row.askVolume > row.bidVolume;
+            const isStrong = ratio >= settings.imbalanceStrongRatio;
+            if (isStrong) {
+              // Strong imbalance: bright filled border highlight
+              ctx.fillStyle = askDominant ? "hsla(145,90%,40%,0.30)" : "hsla(354,80%,52%,0.30)";
+              ctx.fillRect(x + 1, y - rowH / 2, innerW, rowH);
+              ctx.strokeStyle = askDominant ? "hsla(145,100%,55%,0.8)" : "hsla(354,100%,62%,0.8)";
+              ctx.lineWidth = 1;
+              ctx.strokeRect(x + 1, y - rowH / 2, innerW, rowH);
+            } else {
+              // Normal imbalance: subtle tint
+              ctx.fillStyle = askDominant ? "hsla(145,80%,42%,0.18)" : "hsla(354,70%,54%,0.18)";
+              ctx.fillRect(x + 1, y - rowH / 2, innerW, rowH);
+            }
           }
         }
 
@@ -209,9 +235,10 @@ const FootprintChart: React.FC<FootprintChartProps> = ({ candles, settings }) =>
           if (settings.displayMode === "bidAsk") {
             const bidStr = row.bidVolume > settings.volumeFilter ? row.bidVolume.toString() : "";
             const askStr = row.askVolume > settings.volumeFilter ? row.askVolume.toString() : "";
-            ctx.fillStyle = `hsl(165,100%,${45 + vI * 22}%)`;
+            // bid = SELL = RED on left;  ask = BUY = GREEN on right
+            ctx.fillStyle = `hsl(354,80%,${52 + vI * 14}%)`;
             ctx.textAlign = "right"; ctx.fillText(bidStr, midX - 4, y);
-            ctx.fillStyle = `hsl(354,70%,${50 + vI * 15}%)`;
+            ctx.fillStyle = `hsl(145,90%,${42 + vI * 20}%)`;
             ctx.textAlign = "left"; ctx.fillText(askStr, midX + 4, y);
             // centre divider
             ctx.strokeStyle = "hsl(220,14%,18%)";
@@ -235,12 +262,35 @@ const FootprintChart: React.FC<FootprintChartProps> = ({ candles, settings }) =>
 
           } else if (settings.displayMode === "bidAskDelta") {
             const third = innerW / 3;
-            ctx.fillStyle = "hsl(165,100%,50%)";
+            // bid = SELL = RED;  ask = BUY = GREEN
+            ctx.fillStyle = "hsl(354,80%,58%)";
             ctx.textAlign = "center"; ctx.fillText(row.bidVolume.toString(), x + third * 0.5 + 1, y);
-            ctx.fillStyle = "hsl(354,70%,58%)";
+            ctx.fillStyle = "hsl(145,90%,48%)";
             ctx.fillText(row.askVolume.toString(), x + third * 1.5 + 1, y);
-            ctx.fillStyle = row.delta >= 0 ? "hsl(165,100%,50%)" : "hsl(354,70%,58%)";
+            ctx.fillStyle = row.delta >= 0 ? "hsl(145,90%,48%)" : "hsl(354,80%,58%)";
             ctx.fillText((row.delta > 0 ? "+" : "") + row.delta, x + third * 2.5 + 1, y);
+          }
+
+          // Strong imbalance — bold white text override
+          if (settings.highlightImbalance && row.bidVolume > 0 && row.askVolume > 0) {
+            const ratio = Math.max(row.bidVolume / row.askVolume, row.askVolume / row.bidVolume);
+            if (ratio >= settings.imbalanceStrongRatio) {
+              ctx.font = `bold ${settings.fontSize}px "JetBrains Mono",monospace`;
+              ctx.fillStyle = "rgba(255,255,255,0.95)";
+              ctx.textBaseline = "middle";
+              if (settings.displayMode === "bidAsk") {
+                const bs = row.bidVolume > settings.volumeFilter ? row.bidVolume.toString() : "";
+                const as_ = row.askVolume > settings.volumeFilter ? row.askVolume.toString() : "";
+                ctx.textAlign = "right"; ctx.fillText(bs, midX - 4, y);
+                ctx.textAlign = "left"; ctx.fillText(as_, midX + 4, y);
+              } else if (settings.displayMode === "delta") {
+                ctx.textAlign = "center";
+                ctx.fillText((row.delta > 0 ? "+" : "") + row.delta, midX, y);
+              } else {
+                ctx.textAlign = "center";
+                ctx.fillText(row.totalVolume.toString(), midX, y);
+              }
+            }
           }
         }
       });
@@ -269,6 +319,40 @@ const FootprintChart: React.FC<FootprintChartProps> = ({ candles, settings }) =>
         ctx.fillText((candle.totalDelta > 0 ? "+" : "") + candle.totalDelta, midX, chartH - 2);
       }
     });
+
+    // ⏱ Candle Countdown Timer — shown above the last (current) candle
+    if (candles.length >= 2) {
+      const candleDuration = candles[candles.length - 1].timestamp - candles[candles.length - 2].timestamp;
+      const nextCandleTime = candles[candles.length - 1].timestamp + candleDuration;
+      const remainingMs = Math.max(0, nextCandleTime - Date.now());
+      const totalSecs = Math.floor(remainingMs / 1000);
+      const hrs = Math.floor(totalSecs / 3600);
+      const mins = Math.floor((totalSecs % 3600) / 60);
+      const secs = totalSecs % 60;
+      const timerStr = hrs > 0
+        ? `${hrs}:${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
+        : `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+
+      // Position above the last visible candle, clamped to chart area
+      const lastCX = candleX(endIdx) + CW / 2;
+      const timerX = Math.max(40, Math.min(chartW - 40, lastCX));
+
+      ctx.font = `bold 11px "JetBrains Mono",monospace`;
+      const tw = ctx.measureText(timerStr).width + 10;
+      // Badge background
+      ctx.fillStyle = "hsla(220,25%,10%,0.88)";
+      roundRect(ctx, timerX - tw / 2, 4, tw, 16, 3);
+      ctx.fill();
+      // Text color: white normally, amber < 60s, yellow < 10s
+      ctx.fillStyle = remainingMs < 10_000
+        ? "hsl(50,100%,65%)"
+        : remainingMs < 60_000
+          ? "hsl(28,100%,60%)"
+          : "hsl(210,15%,72%)";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(timerStr, timerX, 12);
+    }
 
     //  Volume Profile 
     if (settings.showVolumeProfile) {
@@ -711,6 +795,12 @@ const FootprintChart: React.FC<FootprintChartProps> = ({ candles, settings }) =>
     const ro = new ResizeObserver(() => scheduleRender());
     ro.observe(container);
     return () => ro.disconnect();
+  }, [scheduleRender]);
+
+  // Countdown timer — re-render every second to tick the clock
+  useEffect(() => {
+    const interval = setInterval(scheduleRender, 1000);
+    return () => clearInterval(interval);
   }, [scheduleRender]);
 
   return (

@@ -17,6 +17,7 @@ export interface FootprintSettings {
   volumeFilter: number;
   highlightImbalance: boolean;
   imbalanceRatio: number;
+  imbalanceStrongRatio: number;
   showGrid: boolean;
   showCrosshair: boolean;
   candleWidth: number;
@@ -41,6 +42,7 @@ export const defaultSettings: FootprintSettings = {
   volumeFilter: 0,
   highlightImbalance: true,
   imbalanceRatio: 3,
+  imbalanceStrongRatio: 5,
   showGrid: true,
   showCrosshair: true,
   candleWidth: 120,

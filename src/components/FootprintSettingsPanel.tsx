@@ -125,6 +125,14 @@ const FootprintSettingsPanel: React.FC<FootprintSettingsPanelProps> = ({
           onChange={(v) => update({ imbalanceRatio: v })}
         />
         <SliderRow
+          label="Strong Imbalance"
+          value={settings.imbalanceStrongRatio}
+          min={2}
+          max={15}
+          step={0.5}
+          onChange={(v) => update({ imbalanceStrongRatio: v })}
+        />
+        <SliderRow
           label="Value Area %"
           value={settings.valueAreaPercent}
           min={50}
