@@ -7,6 +7,8 @@ import TradingToolbar from '@/components/TradingToolbar';
 import TradingStatsBar from '@/components/TradingStatsBar';
 import { generateFootprintCandles, generateRealtimeTick } from '@/lib/mockData';
 import { defaultSettings, FootprintSettings, DrawingTool } from '@/lib/footprintSettings';
+import { SYMBOLS, defaultSymbol } from '@/lib/symbolConfig';
+import { useBinanceFeed } from '@/hooks/useBinanceFeed';
 
 const CANDLE_COUNT = 200;
 
@@ -16,7 +18,21 @@ const Index = () => {
   const [timeframe, setTimeframe] = useState('5m');
   const [candles, setCandles] = useState(() => generateFootprintCandles(CANDLE_COUNT, '5m'));
   const [activeTool, setActiveTool] = useState<DrawingTool>('cursor');
+  const [symbol, setSymbol] = useState(defaultSymbol.value);
+  const [dataSource, setDataSource] = useState<'mock' | 'live'>('mock');
   const liveRef = useRef(true);
+
+  // Live Binance feed
+  const symbolConfig = SYMBOLS.find(s => s.value === symbol) ?? defaultSymbol;
+  const { candles: liveCandles, status: feedStatus } = useBinanceFeed(
+    symbol,
+    timeframe,
+    symbolConfig.tickSize,
+    dataSource === 'live',
+  );
+
+  // Which candles to display
+  const displayCandles = dataSource === 'live' ? liveCandles : candles;
 
   const handleTimeframeChange = useCallback((tf: string) => {
     setTimeframe(tf);
@@ -32,8 +48,9 @@ const Index = () => {
     setSettings(s => ({ ...s, activeDrawingTool: t }));
   }, []);
 
-  // Live tick simulation
+  // Mock live tick simulation (only when in mock mode)
   useEffect(() => {
+    if (dataSource !== 'mock') return;
     liveRef.current = true;
     const interval = setInterval(() => {
       if (!liveRef.current) return;
@@ -66,11 +83,11 @@ const Index = () => {
       });
     }, 400);
     return () => { liveRef.current = false; clearInterval(interval); };
-  }, [timeframe]);
+  }, [timeframe, dataSource]);
 
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden bg-background">
-      <TradingStatsBar candles={candles} />
+      <TradingStatsBar candles={displayCandles} />
 
       <TradingToolbar
         timeframe={timeframe}
@@ -80,6 +97,11 @@ const Index = () => {
         settingsOpen={settingsOpen}
         activeTool={activeTool}
         onToolChange={handleToolChange}
+        symbol={symbol}
+        onSymbolChange={setSymbol}
+        dataSource={dataSource}
+        onDataSourceChange={setDataSource}
+        feedStatus={feedStatus}
       />
 
       <div className="flex-1 overflow-hidden min-h-0">
@@ -89,7 +111,7 @@ const Index = () => {
             <PanelGroup direction="vertical" className="h-full">
               {/* Footprint chart */}
               <Panel defaultSize={settings.showCVD ? 75 : 100} minSize={40} className="min-h-0">
-                <FootprintChart candles={candles} settings={settings} timeframe={timeframe} />
+                <FootprintChart candles={displayCandles} settings={settings} timeframe={timeframe} />
               </Panel>
 
               {/* CVD sub-chart */}
@@ -97,7 +119,7 @@ const Index = () => {
                 <>
                   <PanelResizeHandle className="h-1 bg-border hover:bg-primary/40 cursor-row-resize transition-colors" />
                   <Panel defaultSize={25} minSize={10} maxSize={40} className="min-h-0">
-                    <CVDChart candles={candles} candleWidth={settings.candleWidth} />
+                    <CVDChart candles={displayCandles} candleWidth={settings.candleWidth} />
                   </Panel>
                 </>
               )}
