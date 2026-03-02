@@ -1,5 +1,7 @@
 import React from 'react';
 import { FootprintSettings } from '@/lib/footprintSettings';
+import { FeedStatus } from '@/hooks/useBinanceFeed';
+import { SYMBOLS } from '@/lib/symbolConfig';
 import {
   Select,
   SelectContent,
@@ -15,11 +17,33 @@ import { Separator } from '@/components/ui/separator';
 interface FootprintSettingsPanelProps {
   settings: FootprintSettings;
   onSettingsChange: (settings: FootprintSettings) => void;
+  symbol?: string;
+  dataSource?: 'mock' | 'live';
+  feedStatus?: FeedStatus;
 }
+
+const STATUS_COLOR: Record<FeedStatus, string> = {
+  idle:         'bg-muted-foreground',
+  connecting:   'bg-yellow-400 animate-pulse',
+  connected:    'bg-green-500',
+  disconnected: 'bg-red-500',
+  error:        'bg-red-500',
+};
+
+const STATUS_LABEL: Record<FeedStatus, string> = {
+  idle:         'Idle',
+  connecting:   'Connecting…',
+  connected:    'Live',
+  disconnected: 'Disconnected',
+  error:        'Error',
+};
 
 const FootprintSettingsPanel: React.FC<FootprintSettingsPanelProps> = ({
   settings,
   onSettingsChange,
+  symbol = 'btcusdt',
+  dataSource = 'mock',
+  feedStatus = 'idle',
 }) => {
   const update = (partial: Partial<FootprintSettings>) => {
     onSettingsChange({ ...settings, ...partial });
@@ -163,23 +187,31 @@ const FootprintSettingsPanel: React.FC<FootprintSettingsPanelProps> = ({
         <div className="rounded bg-secondary p-2 space-y-1">
           <div className="flex items-center justify-between">
             <span className="text-muted-foreground">Feed</span>
-            <span className="text-poc text-[10px] font-semibold">RITHMIC</span>
+            <span className={`text-[10px] font-semibold ${dataSource === 'live' ? 'text-green-400' : 'text-muted-foreground'}`}>
+              {dataSource === 'live' ? 'BINANCE' : 'MOCK'}
+            </span>
           </div>
           <div className="flex items-center justify-between">
             <span className="text-muted-foreground">Status</span>
             <span className="flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-              <span className="text-primary text-[10px]">Simulated</span>
+              <span className={`w-1.5 h-1.5 rounded-full ${dataSource === 'live' ? STATUS_COLOR[feedStatus] : 'bg-muted-foreground'}`} />
+              <span className={`text-[10px] ${dataSource === 'live' && feedStatus === 'connected' ? 'text-green-400' : 'text-muted-foreground'}`}>
+                {dataSource === 'live' ? STATUS_LABEL[feedStatus] : 'Simulated'}
+              </span>
             </span>
           </div>
           <div className="flex items-center justify-between">
             <span className="text-muted-foreground">Symbol</span>
-            <span className="text-foreground font-semibold">ES 03-26</span>
+            <span className="text-foreground font-semibold">
+              {(SYMBOLS.find(s => s.value === symbol) ?? SYMBOLS[0]).label}
+            </span>
           </div>
         </div>
-        <p className="text-[9px] text-muted-foreground leading-relaxed">
-          Rithmic L2 requires a WebSocket backend proxy. Currently using simulated tick data.
-        </p>
+        {dataSource === 'mock' && (
+          <p className="text-[9px] text-muted-foreground leading-relaxed">
+            Switch to LIVE in the toolbar to connect to Binance Futures.
+          </p>
+        )}
       </div>
     </div>
   );

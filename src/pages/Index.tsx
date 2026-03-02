@@ -94,7 +94,7 @@ const Index = () => {
 
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden bg-background">
-      <TradingStatsBar candles={displayCandles} />
+      <TradingStatsBar candles={displayCandles} symbol={symbol} />
 
       <TradingToolbar
         timeframe={timeframe}
@@ -149,7 +149,13 @@ const Index = () => {
                   </span>
                 </div>
                 <div className="flex-1 overflow-hidden min-h-0">
-                  <FootprintSettingsPanel settings={settings} onSettingsChange={setSettings} />
+                  <FootprintSettingsPanel
+                  settings={settings}
+                  onSettingsChange={setSettings}
+                  symbol={symbol}
+                  dataSource={dataSource}
+                  feedStatus={feedStatus}
+                />
                 </div>
               </Panel>
             </>
