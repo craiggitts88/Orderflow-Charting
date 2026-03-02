@@ -76,7 +76,7 @@ function generateFootprintRows(open: number, high: number, low: number, close: n
       price,
       bidVolume,
       askVolume,
-      delta: bidVolume - askVolume,
+      delta: askVolume - bidVolume,  // delta = buys(ask) - sells(bid)
       totalVolume: bidVolume + askVolume,
       trades: Math.floor(Math.random() * 30 + 5),
     });
@@ -113,7 +113,7 @@ export function generateFootprintCandles(count: number, timeframe: string = '5m'
     const pocRow = rows.reduce((max, r) => r.totalVolume > max.totalVolume ? r : max, rows[0]);
 
     candles.push({
-      timestamp: now - (count - i) * candleInterval,
+      timestamp: now - (count - 1 - i) * candleInterval,  // last candle = now (currently forming)
       open,
       high,
       low,

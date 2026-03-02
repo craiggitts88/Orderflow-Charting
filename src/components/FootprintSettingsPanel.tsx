@@ -60,6 +60,7 @@ const FootprintSettingsPanel: React.FC<FootprintSettingsPanelProps> = ({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="heatmap">Heatmap</SelectItem>
+              <SelectItem value="histogram">Histogram</SelectItem>
               <SelectItem value="deltaFlow">Delta Flow</SelectItem>
               <SelectItem value="gradient">Gradient</SelectItem>
               <SelectItem value="solid">Solid</SelectItem>
@@ -125,14 +126,6 @@ const FootprintSettingsPanel: React.FC<FootprintSettingsPanelProps> = ({
           onChange={(v) => update({ imbalanceRatio: v })}
         />
         <SliderRow
-          label="Strong Imbalance"
-          value={settings.imbalanceStrongRatio}
-          min={2}
-          max={15}
-          step={0.5}
-          onChange={(v) => update({ imbalanceStrongRatio: v })}
-        />
-        <SliderRow
           label="Value Area %"
           value={settings.valueAreaPercent}
           min={50}
@@ -140,6 +133,22 @@ const FootprintSettingsPanel: React.FC<FootprintSettingsPanelProps> = ({
           step={5}
           onChange={(v) => update({ valueAreaPercent: v })}
         />
+      </div>
+
+      <Separator className="bg-border" />
+
+      <div className="space-y-2">
+        <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Colours
+        </h3>
+        <div className="grid grid-cols-2 gap-x-3 gap-y-2">
+          <ColorRow label="Bid / Sell" value={settings.bidColor} onChange={(v) => update({ bidColor: v })} />
+          <ColorRow label="Ask / Buy" value={settings.askColor} onChange={(v) => update({ askColor: v })} />
+          <ColorRow label="POC" value={settings.pocColor} onChange={(v) => update({ pocColor: v })} />
+          <ColorRow label="Imbalance" value={settings.imbalanceColor} onChange={(v) => update({ imbalanceColor: v })} />
+          <ColorRow label="Up Wick" value={settings.upColor} onChange={(v) => update({ upColor: v })} />
+          <ColorRow label="Down Wick" value={settings.downColor} onChange={(v) => update({ downColor: v })} />
+        </div>
       </div>
 
       <Separator className="bg-border" />
@@ -204,6 +213,23 @@ const SliderRow: React.FC<{
       step={step}
       onValueChange={([v]) => onChange(v)}
       className="py-1"
+    />
+  </div>
+);
+
+const ColorRow: React.FC<{
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+}> = ({ label, value, onChange }) => (
+  <div className="flex items-center justify-between gap-2">
+    <Label className="text-xs text-muted-foreground truncate">{label}</Label>
+    <input
+      type="color"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="w-7 h-5 rounded cursor-pointer border border-border bg-transparent p-0"
+      style={{ minWidth: '28px' }}
     />
   </div>
 );

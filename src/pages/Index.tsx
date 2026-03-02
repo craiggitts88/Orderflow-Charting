@@ -47,7 +47,7 @@ const Index = () => {
           const row = { ...last.rows[rowIdx] };
           if (tick.side === 'bid') row.bidVolume += tick.volume;
           else row.askVolume += tick.volume;
-          row.delta = row.bidVolume - row.askVolume;
+          row.delta = row.askVolume - row.bidVolume;  // delta = buys - sells
           row.totalVolume = row.bidVolume + row.askVolume;
           last.rows[rowIdx] = row;
         }
@@ -89,7 +89,7 @@ const Index = () => {
             <PanelGroup direction="vertical" className="h-full">
               {/* Footprint chart */}
               <Panel defaultSize={settings.showCVD ? 75 : 100} minSize={40} className="min-h-0">
-                <FootprintChart candles={candles} settings={settings} />
+                <FootprintChart candles={candles} settings={settings} timeframe={timeframe} />
               </Panel>
 
               {/* CVD sub-chart */}

@@ -1,5 +1,5 @@
-export type DisplayMode = 'bidAsk' | 'delta' | 'totalVolume' | 'bidAskDelta' | 'trades';
-export type ColorMode = 'heatmap' | 'gradient' | 'solid' | 'deltaFlow';
+﻿export type DisplayMode = 'bidAsk' | 'delta' | 'totalVolume' | 'bidAskDelta' | 'trades';
+export type ColorMode = 'heatmap' | 'histogram' | 'deltaFlow' | 'gradient' | 'solid';
 export type DrawingTool = 'cursor' | 'crosshair' | 'line' | 'hline' | 'vline' | 'rectangle' | 'fib' | 'text';
 
 export interface FootprintSettings {
@@ -17,7 +17,6 @@ export interface FootprintSettings {
   volumeFilter: number;
   highlightImbalance: boolean;
   imbalanceRatio: number;
-  imbalanceStrongRatio: number;
   showGrid: boolean;
   showCrosshair: boolean;
   candleWidth: number;
@@ -25,6 +24,13 @@ export interface FootprintSettings {
   valueAreaPercent: number;
   showWicks: boolean;
   showCandleBorder: boolean;
+  // user-adjustable colours
+  bidColor: string;
+  askColor: string;
+  pocColor: string;
+  imbalanceColor: string;
+  upColor: string;
+  downColor: string;
 }
 
 export const defaultSettings: FootprintSettings = {
@@ -42,7 +48,6 @@ export const defaultSettings: FootprintSettings = {
   volumeFilter: 0,
   highlightImbalance: true,
   imbalanceRatio: 3,
-  imbalanceStrongRatio: 5,
   showGrid: true,
   showCrosshair: true,
   candleWidth: 120,
@@ -50,4 +55,10 @@ export const defaultSettings: FootprintSettings = {
   valueAreaPercent: 70,
   showWicks: true,
   showCandleBorder: true,
+  bidColor: '#e04444',
+  askColor: '#22c55e',
+  pocColor: '#f59e0b',
+  imbalanceColor: '#ffffff',
+  upColor: '#22c55e',
+  downColor: '#e04444',
 };

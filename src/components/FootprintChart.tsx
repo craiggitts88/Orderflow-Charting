@@ -1,10 +1,11 @@
 ﻿import React, { useRef, useEffect, useCallback } from "react";
-import { FootprintCandle } from "@/lib/mockData";
+import { FootprintCandle, TIMEFRAME_MS } from "@/lib/mockData";
 import { FootprintSettings, DrawingTool } from "@/lib/footprintSettings";
 
 interface FootprintChartProps {
   candles: FootprintCandle[];
   settings: FootprintSettings;
+  timeframe?: string;
 }
 
 interface ViewState {
@@ -45,13 +46,14 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
   ctx.closePath();
 }
 
-const FootprintChart: React.FC<FootprintChartProps> = ({ candles, settings }) => {
+const FootprintChart: React.FC<FootprintChartProps> = ({ candles, settings, timeframe = '5m' }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   //  IMPORTANT: store candles+settings in refs so render never captures stale values 
   const candlesRef = useRef(candles);
   const settingsRef = useRef(settings);
+  const timeframeRef = useRef(timeframe);
 
   const stateRef = useRef<ViewState>({
     scrollOffset: 0,
@@ -172,125 +174,114 @@ const FootprintChart: React.FC<FootprintChartProps> = ({ candles, settings }) =>
         const bidBarW = maxVol > 0 ? (row.bidVolume / maxVol) * halfW : 0;
         const askBarW = maxVol > 0 ? (row.askVolume / maxVol) * halfW : 0;
 
-        // Background cell tint — kept subtle so histogram bars are visible on top
-        if (settings.colorMode === "heatmap") {
-          const alpha = Math.min(0.12, vI * 0.14);
-          ctx.fillStyle = row.delta > 0
-            ? `hsla(165,100%,42%,${alpha})`
-            : `hsla(354,70%,54%,${alpha})`;
+        // ── Color refs for this row ───────────────────────────────────────────
+        const BC = settings.bidColor; // sell / left
+        const AC = settings.askColor; // buy  / right
+
+        // ── Cell background / histogram ───────────────────────────────────────
+        if (settings.colorMode === "histogram") {
+          // Only draw volume bars — no separate background tint
+          ctx.globalAlpha = 0.58;
+          ctx.fillStyle = BC;
+          ctx.fillRect(midX - bidBarW, y - rowH / 2 + 1, bidBarW, rowH - 2);
+          ctx.fillStyle = AC;
+          ctx.fillRect(midX, y - rowH / 2 + 1, askBarW, rowH - 2);
+          ctx.globalAlpha = 1;
+        } else if (settings.colorMode === "heatmap") {
+          ctx.globalAlpha = Math.min(0.18, vI * 0.22);
+          ctx.fillStyle = row.delta >= 0 ? AC : BC;
           ctx.fillRect(x + 1, y - rowH / 2, innerW, rowH);
+          ctx.globalAlpha = 1;
         } else if (settings.colorMode === "deltaFlow") {
           const dRatio = row.totalVolume > 0 ? row.delta / row.totalVolume : 0;
-          ctx.fillStyle = `hsla(${dRatio > 0 ? 165 : 354},80%,45%,${Math.min(0.22, Math.abs(dRatio) * 0.28)})`;
+          ctx.globalAlpha = Math.min(0.3, Math.abs(dRatio) * 0.38);
+          ctx.fillStyle = dRatio >= 0 ? AC : BC;
           ctx.fillRect(x + 1, y - rowH / 2, innerW, rowH);
+          ctx.globalAlpha = 1;
         } else if (settings.colorMode === "gradient") {
-          ctx.fillStyle = `hsla(210,60%,50%,${vI * 0.12})`;
+          ctx.globalAlpha = vI * 0.16;
+          ctx.fillStyle = "#3b82f6";
           ctx.fillRect(x + 1, y - rowH / 2, innerW, rowH);
+          ctx.globalAlpha = 1;
         } else if (settings.colorMode === "solid") {
-          ctx.fillStyle = "hsla(210,20%,20%,0.2)";
+          ctx.globalAlpha = 0.18;
+          ctx.fillStyle = "#334155";
           ctx.fillRect(x + 1, y - rowH / 2, innerW, rowH);
+          ctx.globalAlpha = 1;
         }
 
-        // Volume histogram bars — bid (SELL) = RED on left, ask (BUY) = GREEN on right
-        ctx.fillStyle = "hsla(354,80%,52%,0.52)";
-        ctx.fillRect(midX - bidBarW, y - rowH / 2 + 1, bidBarW, rowH - 2);
-        ctx.fillStyle = "hsla(145,90%,40%,0.52)";
-        ctx.fillRect(midX, y - rowH / 2 + 1, askBarW, rowH - 2);
-
-        // POC
+        // ── POC ───────────────────────────────────────────────────────────────
         if (row.price === candle.pocPrice && settings.showPOC) {
-          ctx.fillStyle = "hsla(45,100%,55%,0.14)";
+          ctx.globalAlpha = 0.18;
+          ctx.fillStyle = settings.pocColor;
           ctx.fillRect(x + 1, y - rowH / 2, innerW, rowH);
-          ctx.strokeStyle = "hsla(45,100%,55%,0.65)";
+          ctx.globalAlpha = 0.7;
+          ctx.strokeStyle = settings.pocColor;
           ctx.lineWidth = 1;
           ctx.strokeRect(x + 1, y - rowH / 2, innerW, rowH);
+          ctx.globalAlpha = 1;
         }
 
-        // Imbalance highlight — normal tier + strong tier
-        if (settings.highlightImbalance && row.bidVolume > 0 && row.askVolume > 0) {
-          const ratio = Math.max(row.bidVolume / row.askVolume, row.askVolume / row.bidVolume);
-          if (ratio >= settings.imbalanceRatio) {
-            const askDominant = row.askVolume > row.bidVolume;
-            const isStrong = ratio >= settings.imbalanceStrongRatio;
-            if (isStrong) {
-              // Strong imbalance: bright filled border highlight
-              ctx.fillStyle = askDominant ? "hsla(145,90%,40%,0.30)" : "hsla(354,80%,52%,0.30)";
-              ctx.fillRect(x + 1, y - rowH / 2, innerW, rowH);
-              ctx.strokeStyle = askDominant ? "hsla(145,100%,55%,0.8)" : "hsla(354,100%,62%,0.8)";
-              ctx.lineWidth = 1;
-              ctx.strokeRect(x + 1, y - rowH / 2, innerW, rowH);
-            } else {
-              // Normal imbalance: subtle tint
-              ctx.fillStyle = askDominant ? "hsla(145,80%,42%,0.18)" : "hsla(354,70%,54%,0.18)";
-              ctx.fillRect(x + 1, y - rowH / 2, innerW, rowH);
-            }
-          }
+        // ── Imbalance — single threshold ──────────────────────────────────────
+        const isImbalanced = settings.highlightImbalance
+          && row.bidVolume > 0 && row.askVolume > 0
+          && Math.max(row.bidVolume / row.askVolume, row.askVolume / row.bidVolume) >= settings.imbalanceRatio;
+
+        if (isImbalanced) {
+          ctx.globalAlpha = 0.22;
+          ctx.fillStyle = settings.imbalanceColor;
+          ctx.fillRect(x + 1, y - rowH / 2, innerW, rowH);
+          ctx.globalAlpha = 0.7;
+          ctx.strokeStyle = settings.imbalanceColor;
+          ctx.lineWidth = 1;
+          ctx.strokeRect(x + 1, y - rowH / 2, innerW, rowH);
+          ctx.globalAlpha = 1;
         }
 
-        // Text  only when rows are big enough
+        // ── Text ──────────────────────────────────────────────────────────────
         if (rowH >= settings.fontSize + 2) {
-          ctx.font = `${settings.fontSize}px "JetBrains Mono",monospace`;
           ctx.textBaseline = "middle";
+          if (isImbalanced) {
+            ctx.font = `bold ${settings.fontSize}px "JetBrains Mono",monospace`;
+            ctx.fillStyle = settings.imbalanceColor;
+          } else {
+            ctx.font = `${settings.fontSize}px "JetBrains Mono",monospace`;
+          }
 
           if (settings.displayMode === "bidAsk") {
             const bidStr = row.bidVolume > settings.volumeFilter ? row.bidVolume.toString() : "";
             const askStr = row.askVolume > settings.volumeFilter ? row.askVolume.toString() : "";
-            // bid = SELL = RED on left;  ask = BUY = GREEN on right
-            ctx.fillStyle = `hsl(354,80%,${52 + vI * 14}%)`;
+            if (!isImbalanced) ctx.fillStyle = BC;
             ctx.textAlign = "right"; ctx.fillText(bidStr, midX - 4, y);
-            ctx.fillStyle = `hsl(145,90%,${42 + vI * 20}%)`;
+            if (!isImbalanced) ctx.fillStyle = AC;
             ctx.textAlign = "left"; ctx.fillText(askStr, midX + 4, y);
-            // centre divider
             ctx.strokeStyle = "hsl(220,14%,18%)";
             ctx.lineWidth = 0.5;
             ctx.beginPath(); ctx.moveTo(midX, y - rowH / 2); ctx.lineTo(midX, y + rowH / 2); ctx.stroke();
 
           } else if (settings.displayMode === "delta") {
-            ctx.fillStyle = row.delta >= 0 ? "hsl(165,100%,50%)" : "hsl(354,70%,58%)";
+            if (!isImbalanced) ctx.fillStyle = row.delta >= 0 ? AC : BC;
             ctx.textAlign = "center";
             ctx.fillText((row.delta > 0 ? "+" : "") + row.delta, midX, y);
 
           } else if (settings.displayMode === "totalVolume") {
-            ctx.fillStyle = `hsl(210,20%,${50 + vI * 30}%)`;
+            if (!isImbalanced) ctx.fillStyle = `hsl(210,20%,${50 + vI * 30}%)`;
             ctx.textAlign = "center";
             ctx.fillText(row.totalVolume.toString(), midX, y);
 
           } else if (settings.displayMode === "trades") {
-            ctx.fillStyle = `hsl(270,80%,${55 + vI * 20}%)`;
+            if (!isImbalanced) ctx.fillStyle = `hsl(270,80%,${55 + vI * 20}%)`;
             ctx.textAlign = "center";
             ctx.fillText(row.trades.toString(), midX, y);
 
           } else if (settings.displayMode === "bidAskDelta") {
             const third = innerW / 3;
-            // bid = SELL = RED;  ask = BUY = GREEN
-            ctx.fillStyle = "hsl(354,80%,58%)";
+            if (!isImbalanced) ctx.fillStyle = BC;
             ctx.textAlign = "center"; ctx.fillText(row.bidVolume.toString(), x + third * 0.5 + 1, y);
-            ctx.fillStyle = "hsl(145,90%,48%)";
+            if (!isImbalanced) ctx.fillStyle = AC;
             ctx.fillText(row.askVolume.toString(), x + third * 1.5 + 1, y);
-            ctx.fillStyle = row.delta >= 0 ? "hsl(145,90%,48%)" : "hsl(354,80%,58%)";
+            if (!isImbalanced) ctx.fillStyle = row.delta >= 0 ? AC : BC;
             ctx.fillText((row.delta > 0 ? "+" : "") + row.delta, x + third * 2.5 + 1, y);
-          }
-
-          // Strong imbalance — bold white text override
-          if (settings.highlightImbalance && row.bidVolume > 0 && row.askVolume > 0) {
-            const ratio = Math.max(row.bidVolume / row.askVolume, row.askVolume / row.bidVolume);
-            if (ratio >= settings.imbalanceStrongRatio) {
-              ctx.font = `bold ${settings.fontSize}px "JetBrains Mono",monospace`;
-              ctx.fillStyle = "rgba(255,255,255,0.95)";
-              ctx.textBaseline = "middle";
-              if (settings.displayMode === "bidAsk") {
-                const bs = row.bidVolume > settings.volumeFilter ? row.bidVolume.toString() : "";
-                const as_ = row.askVolume > settings.volumeFilter ? row.askVolume.toString() : "";
-                ctx.textAlign = "right"; ctx.fillText(bs, midX - 4, y);
-                ctx.textAlign = "left"; ctx.fillText(as_, midX + 4, y);
-              } else if (settings.displayMode === "delta") {
-                ctx.textAlign = "center";
-                ctx.fillText((row.delta > 0 ? "+" : "") + row.delta, midX, y);
-              } else {
-                ctx.textAlign = "center";
-                ctx.fillText(row.totalVolume.toString(), midX, y);
-              }
-            }
           }
         }
       });
@@ -302,12 +293,14 @@ const FootprintChart: React.FC<FootprintChartProps> = ({ candles, settings }) =>
         const openY = priceToY(candle.open);
         const closeY = priceToY(candle.close);
         const isBull = candle.close >= candle.open;
-        ctx.strokeStyle = isBull ? "hsla(165,100%,50%,0.7)" : "hsla(354,70%,54%,0.7)";
+        ctx.strokeStyle = isBull ? settings.upColor : settings.downColor;
+        ctx.globalAlpha = 0.7;
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(midX, highY); ctx.lineTo(midX, Math.min(openY, closeY));
         ctx.moveTo(midX, Math.max(openY, closeY)); ctx.lineTo(midX, lowY);
         ctx.stroke();
+        ctx.globalAlpha = 1;
       }
 
       //  Per-candle delta footer 
@@ -315,14 +308,14 @@ const FootprintChart: React.FC<FootprintChartProps> = ({ candles, settings }) =>
         ctx.font = `bold ${Math.max(8, settings.fontSize - 1)}px "JetBrains Mono",monospace`;
         ctx.textAlign = "center";
         ctx.textBaseline = "bottom";
-        ctx.fillStyle = candle.totalDelta >= 0 ? "hsl(165,100%,50%)" : "hsl(354,70%,58%)";
+        ctx.fillStyle = candle.totalDelta >= 0 ? settings.askColor : settings.bidColor;
         ctx.fillText((candle.totalDelta > 0 ? "+" : "") + candle.totalDelta, midX, chartH - 2);
       }
     });
 
-    // ⏱ Candle Countdown Timer — shown above the last (current) candle
-    if (candles.length >= 2) {
-      const candleDuration = candles[candles.length - 1].timestamp - candles[candles.length - 2].timestamp;
+    // ⏱ Candle Countdown Timer — use TIMEFRAME_MS for accurate duration
+    if (candles.length >= 1) {
+      const candleDuration = TIMEFRAME_MS[timeframeRef.current] ?? 300_000;
       const nextCandleTime = candles[candles.length - 1].timestamp + candleDuration;
       const remainingMs = Math.max(0, nextCandleTime - Date.now());
       const totalSecs = Math.floor(remainingMs / 1000);
@@ -333,17 +326,14 @@ const FootprintChart: React.FC<FootprintChartProps> = ({ candles, settings }) =>
         ? `${hrs}:${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`
         : `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
 
-      // Position above the last visible candle, clamped to chart area
       const lastCX = candleX(endIdx) + CW / 2;
       const timerX = Math.max(40, Math.min(chartW - 40, lastCX));
 
       ctx.font = `bold 11px "JetBrains Mono",monospace`;
       const tw = ctx.measureText(timerStr).width + 10;
-      // Badge background
       ctx.fillStyle = "hsla(220,25%,10%,0.88)";
       roundRect(ctx, timerX - tw / 2, 4, tw, 16, 3);
       ctx.fill();
-      // Text color: white normally, amber < 60s, yellow < 10s
       ctx.fillStyle = remainingMs < 10_000
         ? "hsl(50,100%,65%)"
         : remainingMs < 60_000
@@ -557,7 +547,9 @@ const FootprintChart: React.FC<FootprintChartProps> = ({ candles, settings }) =>
     stateRef.current.candleWidth = settings.candleWidth;
     scheduleRender();
   }, [settings, scheduleRender]);
-
+  useEffect(() => {
+    timeframeRef.current = timeframe;
+  }, [timeframe]);
   //  Mouse / Wheel events 
   useEffect(() => {
     const canvas = canvasRef.current;
