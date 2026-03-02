@@ -20,6 +20,7 @@ interface FootprintSettingsPanelProps {
   symbol?: string;
   dataSource?: 'mock' | 'live';
   feedStatus?: FeedStatus;
+  minTick?: number;
 }
 
 const STATUS_COLOR: Record<FeedStatus, string> = {
@@ -44,6 +45,7 @@ const FootprintSettingsPanel: React.FC<FootprintSettingsPanelProps> = ({
   symbol = 'btcusdt',
   dataSource = 'mock',
   feedStatus = 'idle',
+  minTick = 0.1,
 }) => {
   const update = (partial: Partial<FootprintSettings>) => {
     onSettingsChange({ ...settings, ...partial });
@@ -110,6 +112,77 @@ const FootprintSettingsPanel: React.FC<FootprintSettingsPanelProps> = ({
         <ToggleRow label="Wicks" checked={settings.showWicks} onChange={(v) => update({ showWicks: v })} />
         <ToggleRow label="Candle Body" checked={settings.showCandleBody} onChange={(v) => update({ showCandleBody: v })} />
         <ToggleRow label="Imbalance" checked={settings.highlightImbalance} onChange={(v) => update({ highlightImbalance: v })} />
+      </div>
+
+      <Separator className="bg-border" />
+
+      {/* ── Row Size ──────────────────────────────────────── */}
+      <div className="space-y-2">
+        <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Row Size
+        </h3>
+
+        {/* Mode toggle */}
+        <div className="flex rounded overflow-hidden border border-border text-[10px] font-mono">
+          {(['manual', 'atr'] as const).map(mode => (
+            <button
+              key={mode}
+              onClick={() => update({ rowSizeMode: mode })}
+              className={`flex-1 py-1 transition-colors ${
+                settings.rowSizeMode === mode
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-secondary'
+              }`}
+            >
+              {mode === 'manual' ? 'Manual' : 'ATR Auto'}
+            </button>
+          ))}
+        </div>
+
+        {settings.rowSizeMode === 'manual' ? (
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs text-muted-foreground">Row Size</Label>
+              <span className="text-[10px] text-muted-foreground font-mono">
+                min tick: {minTick}
+              </span>
+            </div>
+            <input
+              type="number"
+              step={minTick}
+              min={minTick}
+              value={settings.manualRowSize}
+              onChange={e => {
+                const v = parseFloat(e.target.value);
+                if (!isNaN(v) && v >= minTick) update({ manualRowSize: v });
+              }}
+              className="w-full h-7 rounded bg-secondary border border-border px-2 text-xs font-mono text-foreground focus:outline-none focus:border-primary"
+            />
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-[10px] font-mono">
+              <span className="text-muted-foreground">Computed row size</span>
+              <span className="text-primary">{settings.tickSize}</span>
+            </div>
+            <SliderRow
+              label={`ATR Period (${settings.atrPeriod})`}
+              value={settings.atrPeriod}
+              min={5}
+              max={50}
+              step={1}
+              onChange={(v) => update({ atrPeriod: v })}
+            />
+            <SliderRow
+              label={`Rows / ATR (${settings.atrDivisor})`}
+              value={settings.atrDivisor}
+              min={5}
+              max={100}
+              step={5}
+              onChange={(v) => update({ atrDivisor: v })}
+            />
+          </div>
+        )}
       </div>
 
       <Separator className="bg-border" />

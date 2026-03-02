@@ -5,10 +5,25 @@ import CVDChart from '@/components/CVDChart';
 import FootprintSettingsPanel from '@/components/FootprintSettingsPanel';
 import TradingToolbar from '@/components/TradingToolbar';
 import TradingStatsBar from '@/components/TradingStatsBar';
-import { generateFootprintCandles, generateRealtimeTick } from '@/lib/mockData';
+import { generateFootprintCandles, generateRealtimeTick, FootprintCandle } from '@/lib/mockData';
 import { defaultSettings, FootprintSettings, DrawingTool } from '@/lib/footprintSettings';
 import { SYMBOLS, defaultSymbol } from '@/lib/symbolConfig';
 import { useBinanceFeed } from '@/hooks/useBinanceFeed';
+
+// Compute ATR-based row size from candles
+function computeAtrRowSize(candles: FootprintCandle[], period: number, divisor: number, minTick: number, fallback: number): number {
+  if (candles.length < 2) return fallback;
+  const slice = candles.slice(-Math.min(period + 1, candles.length));
+  let sum = 0;
+  for (let i = 1; i < slice.length; i++) {
+    const c = slice[i], p = slice[i - 1];
+    sum += Math.max(c.high - c.low, Math.abs(c.high - p.close), Math.abs(c.low - p.close));
+  }
+  const atr = sum / (slice.length - 1);
+  const raw = atr / divisor;
+  const ticks = Math.max(1, Math.round(raw / minTick));
+  return parseFloat((ticks * minTick).toPrecision(10));
+}
 
 const CANDLE_COUNT = 200;
 
@@ -28,22 +43,45 @@ const Index = () => {
     setDataSource('live');
   }, []);
 
-  // Live Binance feed
+  // Live Binance feed — use settings.tickSize which is kept up to date below
   const symbolConfig = SYMBOLS.find(s => s.value === symbol) ?? defaultSymbol;
   const { candles: liveCandles, status: feedStatus } = useBinanceFeed(
     symbol,
     timeframe,
-    symbolConfig.tickSize,
+    settings.tickSize,
     dataSource === 'live',
   );
 
   // Which candles to display
   const displayCandles = dataSource === 'live' ? liveCandles : candles;
 
-  // Sync tickSize whenever symbol changes
+  // Track last applied row size to avoid feed reconnect loops
+  const lastRowSizeRef = useRef(0);
+
+  // Recompute row size whenever mode/params/symbol/candle count changes (not every tick)
   useEffect(() => {
-    setSettings(s => ({ ...s, tickSize: symbolConfig.tickSize }));
-  }, [symbol, symbolConfig.tickSize]);
+    const sc = SYMBOLS.find(s => s.value === symbol) ?? defaultSymbol;
+    let rowSize: number;
+    if (settings.rowSizeMode === 'manual') {
+      const ticks = Math.max(1, Math.round(settings.manualRowSize / sc.minTick));
+      rowSize = parseFloat((ticks * sc.minTick).toPrecision(10));
+    } else {
+      rowSize = computeAtrRowSize(displayCandles, settings.atrPeriod, settings.atrDivisor, sc.minTick, sc.tickSize);
+    }
+    if (rowSize !== lastRowSizeRef.current) {
+      lastRowSizeRef.current = rowSize;
+      setSettings(s => ({ ...s, tickSize: rowSize, atrRowSize: rowSize }));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [symbol, settings.rowSizeMode, settings.manualRowSize, settings.atrPeriod, settings.atrDivisor, displayCandles.length]);
+
+  // When symbol changes in live mode, seed manualRowSize with symbol default
+  useEffect(() => {
+    const sc = SYMBOLS.find(s => s.value === symbol) ?? defaultSymbol;
+    setSettings(s => ({ ...s, tickSize: sc.tickSize, manualRowSize: sc.tickSize }));
+    lastRowSizeRef.current = sc.tickSize;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [symbol]);
 
   const handleTimeframeChange = useCallback((tf: string) => {
     setTimeframe(tf);
@@ -159,6 +197,7 @@ const Index = () => {
                   symbol={symbol}
                   dataSource={dataSource}
                   feedStatus={feedStatus}
+                  minTick={symbolConfig.minTick}
                 />
                 </div>
               </Panel>

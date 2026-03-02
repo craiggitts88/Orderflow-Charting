@@ -1,6 +1,7 @@
 ﻿export type DisplayMode = 'bidAsk' | 'delta' | 'totalVolume' | 'bidAskDelta' | 'trades';
 export type ColorMode = 'heatmap' | 'histogram' | 'deltaFlow' | 'gradient' | 'solid';
 export type DrawingTool = 'cursor' | 'crosshair' | 'line' | 'hline' | 'vline' | 'rectangle' | 'fib' | 'text' | 'frvp';
+export type RowSizeMode = 'manual' | 'atr';
 
 export interface FootprintSettings {
   displayMode: DisplayMode;
@@ -11,7 +12,12 @@ export interface FootprintSettings {
   showVolumeProfile: boolean;
   showSessionVPOC: boolean;
   showValueArea: boolean;
-  tickSize: number;
+  tickSize: number;          // effective row size (computed; driven by rowSizeMode)
+  rowSizeMode: RowSizeMode;
+  manualRowSize: number;     // price units per row when mode=manual
+  atrPeriod: number;         // periods to calculate ATR when mode=atr
+  atrDivisor: number;        // number of rows per ATR range (higher = finer rows)
+  atrRowSize: number;        // computed result (read-only, set by Index.tsx)
   fontSize: number;
   cellPadding: number;
   volumeFilter: number;
@@ -46,6 +52,11 @@ export const defaultSettings: FootprintSettings = {
   showSessionVPOC: false,
   showValueArea: false,
   tickSize: 0.25,
+  rowSizeMode: 'atr',
+  manualRowSize: 5,
+  atrPeriod: 14,
+  atrDivisor: 20,
+  atrRowSize: 5,
   fontSize: 11,
   cellPadding: 2,
   volumeFilter: 0,
